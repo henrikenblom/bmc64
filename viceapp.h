@@ -36,6 +36,7 @@
 #include <circle/timer.h>
 #include <circle/usb/usbhcidevice.h>
 #include <ff.h>
+#include <fsck.fat.h>
 
 #include <circle_glue.h>
 #include <stdio.h>
