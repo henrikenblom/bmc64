@@ -374,9 +374,11 @@ static void list_files(struct menu_item *parent,
   if (dp != NULL) {
     while (ep = readdir(dp)) {
       if (ep->d_type & DT_DIR) {
-        ui_menu_add_button_with_value(menu_id, &dirs_root, ep->d_name, 0,
-                                      ep->d_name, "(dir)")
-            ->sub_id = MENU_SUB_ENTER_DIR;
+        if (strncmp(ep->d_name, ".", 1)) {
+          ui_menu_add_button_with_value(menu_id, &dirs_root, ep->d_name, 0,
+                                        ep->d_name, "(dir)")
+              ->sub_id = MENU_SUB_ENTER_DIR;
+        }
       } else {
         include = 0;
         if (!strncmp(ep->d_name, ".", 1)) {
