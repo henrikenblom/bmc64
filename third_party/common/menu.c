@@ -379,7 +379,7 @@ static void list_files(struct menu_item *parent,
             ->sub_id = MENU_SUB_ENTER_DIR;
       } else {
         include = 0;
-        if (strncmp(ep->d_name, ".", 1)) {
+        if (!strncmp(ep->d_name, ".", 1)) {
           include = 0;
         } else if (filter == FILTER_DISK) {
           include = test_disk_name(ep->d_name);
