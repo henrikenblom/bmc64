@@ -1,4 +1,4 @@
-# BMC64
+# Fork of BMC64, tweaked for my one-off build, the PBMC64, Portable Bare Metal C64 emulator.
 
 BMC64 is a bare metal C64 emulator for the Raspberry Pi with true 50hz/60hz smooth scrolling and low latency between input & video/audio. Four other Commodore machines are available as well; C128, Vic20, Plus/4 and PET.
 
