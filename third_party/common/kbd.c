@@ -461,6 +461,10 @@ void emu_key_released(long key) {
     emu_quick_func_interrupt(BTN_ASSIGN_VOLUME_UP);
   }
 
+  if (key == KEYCODE_KP_Add) {
+    emu_quick_func_interrupt(BTN_ASSIGN_VKBD_TOGGLE);
+  }
+
   // Intercept keys meant to become joystick values
   if (joydevs[0].device == JOYDEV_NUMS_1 ||
       joydevs[0].device == JOYDEV_NUMS_2 ||
