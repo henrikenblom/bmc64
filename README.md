@@ -4,6 +4,9 @@ BMC64 is a bare metal C64 emulator for the Raspberry Pi with true 50hz/60hz smoo
 
 # How this fork differs from the original
 At the time of writing, these are the differences:
+  * Bring up the virtual keyboard using the '+'-button on the numeric keypad
+  * Navigate the virtual keyboard using the numeric keypad, in the same manner as a numeric keypad-mapped joystick
+  * Default to USB1 for storage access (quick-fix that, for now, makes the emulator freeze if there's no attached USB drive)
   * Volume down/up using F10/F11
   * FPS out of range message in the timing menu outputs the measured FPS. (Helpful when creating custom timings.)
   * make_machines.sh makes C64 the default kernel image
