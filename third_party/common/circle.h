@@ -111,7 +111,6 @@
 #define BTN_ASSIGN_VKBD_TOGGLE 28
 #define BTN_ASSIGN_RESET_MENU 29
 #define BTN_ASSIGN_FLUSH_DISK 30
-#define BTN_ASSIGN_VKBD_HIDE 31
 
 // For devices without external volume control
 #define BTN_ASSIGN_VOLUME_UP 100
