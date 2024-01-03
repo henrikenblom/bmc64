@@ -439,7 +439,6 @@ void emu_key_released(long key) {
   }
 
   if (key == KEYCODE_F12) {
-    emu_quick_func_interrupt(BTN_ASSIGN_VKBD_HIDE);
     if (ui_enabled) {
       // Let the ui handle the menu action as it sees fit.
       emu_ui_key_interrupt(key, 0 /* up */);

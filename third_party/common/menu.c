@@ -3938,11 +3938,6 @@ void menu_quick_func(int button_assignment) {
        vkbd_enable();
     }
     break;
-  case BTN_ASSIGN_VKBD_HIDE:
-    if (vkbd_showing) {
-      vkbd_disable();
-    }
-    break;
   case BTN_ASSIGN_STATUS_TOGGLE:
     // Ignore this if it's already showing.
     if (statusbar_item->value == OVERLAY_ALWAYS)
