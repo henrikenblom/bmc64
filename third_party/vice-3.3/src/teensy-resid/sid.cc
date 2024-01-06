@@ -18,8 +18,6 @@
 //  ---------------------------------------------------------------------------
 
 #include "sid.h"
-#include <math.h>
-//#include <AudioStream.h>
 RESID_NAMESPACE_START
 
 // Resampling constants.
