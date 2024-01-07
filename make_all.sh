@@ -32,6 +32,12 @@ echo Need arg [pi0|pi2|pi3|pi4]
 exit
 fi
 
+PI_ZERO_WITH_DPI=$2
+if [ "$PI_ZERO_WITH_DPI" = "pz_dpi" ]
+then
+echo Configuring for Pi Zero with DPI - PWM audio on GPIO 18 and 19
+fi
+
 if [ -f sdcard/config.txt ]
 then
 echo Making everything...
@@ -62,6 +68,11 @@ perl -pi -e 's@#define USE_PHYSICAL_COUNTER@//#define USE_PHYSICAL_COUNTER@' ./i
 perl -pi -e 's@//#define SAVE_VFP_REGS_ON_IRQ@#define SAVE_VFP_REGS_ON_IRQ@' ./include/circle/sysconfig.h
 else
 patch -N -p1 < ../../../../circle_patch.diff
+fi
+
+if [ "$PI_ZERO_WITH_DPI" = "pz_dpi" ]
+then
+patch -N -p1 < ../../../../pizero_dpi_pwm_audio_patch.diff
 fi
 
 echo ==============================================================

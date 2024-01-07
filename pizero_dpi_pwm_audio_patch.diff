@@ -1,0 +1,33 @@
+diff --git a/lib/machineinfo.cpp b/lib/machineinfo.cpp
+--- a/lib/machineinfo.cpp	(revision fe24b6bebd1532f2a0ee981af12eaf50cc9e97fb)
++++ b/lib/machineinfo.cpp	(date 1704635376637)
+@@ -332,13 +332,7 @@
+ 	switch (Pin)
+ 	{
+ 	case GPIOPinAudioLeft:
+-#ifdef USE_PWM_AUDIO_ON_ZERO
+-		if (   m_MachineModel == MachineModelZero
+-		    || m_MachineModel == MachineModelZeroW)
+-		{
+-			return 12;
+-		}
+-#endif
++    return 19;
+ 		if (m_MachineModel <= MachineModelBRelease2MB512)
+ 		{
+ 			nResult = 40;
+@@ -357,13 +351,7 @@
+ 		break;
+
+ 	case GPIOPinAudioRight:
+-#ifdef USE_PWM_AUDIO_ON_ZERO
+-		if (   m_MachineModel == MachineModelZero
+-		    || m_MachineModel == MachineModelZeroW)
+-		{
+-			return 13;
+-		}
+-#endif
++    return 18;
+ 		if (m_MachineModel <= MachineModelBRelease2MB512)
+ 		{
+ 			nResult = 45;
