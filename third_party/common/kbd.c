@@ -413,7 +413,8 @@ void emu_key_pressed(long key) {
   }
 
   if (key == KEYCODE_KP_Subtract) {
-    key = last_key;
+    emux_key_interrupt(last_key, 1 /* down */);
+    return;
   }
 
   if (ui_enabled) {
@@ -496,7 +497,8 @@ void emu_key_released(long key) {
   }
 
   if (key == KEYCODE_KP_Subtract) {
-    key = last_key;
+    emux_key_interrupt(last_key, 0 /* up */);
+    return;
   } else {
     last_key = key;
   }
