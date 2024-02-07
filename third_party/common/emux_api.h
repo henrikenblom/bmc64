@@ -362,7 +362,6 @@ void emux_joy_interrupt(int type, int port, int device, int value);
 // Safe to call from ISR
 void emux_key_interrupt(long key, int pressed);
 void emux_key_interrupt_locked(long key, int pressed);
-void emux_last_key_interrupt(int pressed);
 
 vkbd_key_array emux_get_vkbd(void);
 int emux_get_vkbd_width(void);

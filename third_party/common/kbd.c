@@ -47,6 +47,7 @@ static int control_down = 0;
 static int f7_down = 0;
 static unsigned long video_reset_time_down;
 static unsigned long video_reset_time_delay = TICKS_PER_SECOND * 5;
+long last_key = KEYCODE_Space;
 
 key_combo_state_t key_combo_states[NUM_KEY_COMBOS];
 
@@ -412,7 +413,7 @@ void emu_key_pressed(long key) {
   }
 
   if (key == KEYCODE_KP_Subtract) {
-    emux_key_interrupt(KEYCODE_Space, 1);
+    key = last_key;
   }
 
   if (ui_enabled) {
@@ -420,6 +421,7 @@ void emu_key_pressed(long key) {
   } else {
     emux_key_interrupt(key, 1 /* down */);
   }
+  last_key = key;
 }
 
 void emu_key_released(long key) {
@@ -470,10 +472,6 @@ void emu_key_released(long key) {
     emu_quick_func_interrupt(BTN_ASSIGN_VKBD_TOGGLE);
   }
 
-  if (key == KEYCODE_KP_Subtract) {
-    emux_key_interrupt(KEYCODE_Space, 0);
-  }
-
   // Intercept keys meant to become joystick values
   if (joydevs[0].device == JOYDEV_NUMS_1 ||
       joydevs[0].device == JOYDEV_NUMS_2 ||
@@ -498,11 +496,17 @@ void emu_key_released(long key) {
     return;
   }
 
+  if (key == KEYCODE_KP_Subtract) {
+    key = last_key;
+  }
+
   if (ui_enabled) {
     emu_ui_key_interrupt(key, 0 /* up */);
   } else {
     emux_key_interrupt(key, 0 /* up */);
   }
+
+  last_key = key;
 
   // Check hotkey combo here
   if (key == commodore_key_sym || key == ctrl_key_sym) {

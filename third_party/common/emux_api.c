@@ -57,7 +57,6 @@ int vic_showing;
 int vdc_showing;
 int vic_enabled = 1;
 int vdc_enabled;
-long last_key = 0x2C; // Space key
 
 // Ring buffer for key latch events
 struct pending_emu_key_s pending_emu_key;
@@ -84,16 +83,6 @@ void emux_key_interrupt_locked(long key, int pressed) {
   pending_emu_key.pressed[i] = pressed;
   pending_emu_key.tail++;
 }
-
-void emux_last_key_interrupt(int pressed) {
-  circle_lock_acquire();
-  int i = pending_emu_key.tail & 0xf;
-  pending_emu_key.key[i] = last_key;
-  pending_emu_key.pressed[i] = pressed;
-  pending_emu_key.tail++;
-  circle_lock_release();
-}
-
 // Queue a joy latch change for the main loop
 void emux_joy_interrupt(int type, int port, int device, int value) {
   circle_lock_acquire();
