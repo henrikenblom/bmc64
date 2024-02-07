@@ -412,8 +412,7 @@ void emu_key_pressed(long key) {
   }
 
   if (key == KEYCODE_KP_Subtract) {
-    emux_last_key_interrupt(0);
-    return;
+    emux_key_interrupt(KEYCODE_Space, 1);
   }
 
   if (ui_enabled) {
@@ -472,8 +471,7 @@ void emu_key_released(long key) {
   }
 
   if (key == KEYCODE_KP_Subtract) {
-    emux_last_key_interrupt(0);
-    return;
+    emux_key_interrupt(KEYCODE_Space, 0);
   }
 
   // Intercept keys meant to become joystick values
