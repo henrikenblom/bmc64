@@ -47,7 +47,7 @@ static int control_down = 0;
 static int f7_down = 0;
 static unsigned long video_reset_time_down;
 static unsigned long video_reset_time_delay = TICKS_PER_SECOND * 5;
-long last_key = KEYCODE_Space;
+static long last_key = KEYCODE_1;
 
 key_combo_state_t key_combo_states[NUM_KEY_COMBOS];
 
@@ -413,8 +413,7 @@ void emu_key_pressed(long key) {
   }
 
   if (key == KEYCODE_KP_Subtract) {
-    emux_key_interrupt(last_key, 1 /* down */);
-    return;
+    emu_ui_key_interrupt(last_key, 1 /* down */);
   }
 
   if (ui_enabled) {
@@ -498,7 +497,6 @@ void emu_key_released(long key) {
 
   if (key == KEYCODE_KP_Subtract) {
     emux_key_interrupt(last_key, 0 /* up */);
-    return;
   } else {
     last_key = key;
   }
