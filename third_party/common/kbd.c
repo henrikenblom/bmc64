@@ -421,7 +421,6 @@ void emu_key_pressed(long key) {
   } else {
     emux_key_interrupt(key, 1 /* down */);
   }
-  last_key = key;
 }
 
 void emu_key_released(long key) {
@@ -498,6 +497,8 @@ void emu_key_released(long key) {
 
   if (key == KEYCODE_KP_Subtract) {
     key = last_key;
+  } else {
+    last_key = key;
   }
 
   if (ui_enabled) {
@@ -505,8 +506,6 @@ void emu_key_released(long key) {
   } else {
     emux_key_interrupt(key, 0 /* up */);
   }
-
-  last_key = key;
 
   // Check hotkey combo here
   if (key == commodore_key_sym || key == ctrl_key_sym) {
