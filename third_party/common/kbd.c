@@ -47,7 +47,7 @@ static int control_down = 0;
 static int f7_down = 0;
 static unsigned long video_reset_time_down;
 static unsigned long video_reset_time_delay = TICKS_PER_SECOND * 5;
-static long last_key = KEYCODE_Return;
+static long last_key = KEYCODE_Space;
 
 key_combo_state_t key_combo_states[NUM_KEY_COMBOS];
 
