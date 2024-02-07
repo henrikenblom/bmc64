@@ -376,7 +376,6 @@ void emux_key_press_interrupt(long key) {
     emux_key_interrupt(last_key, 1 /* down */);
   } else {
     emux_key_interrupt(key, 1 /* down */);
-    last_key = key;
   }
 }
 
@@ -385,7 +384,6 @@ void emux_key_release_interrupt(long key) {
     emux_key_interrupt(last_key, 0 /* down */);
   } else {
     emux_key_interrupt(key, 0 /* down */);
-    last_key = key;
   }
 }
 
