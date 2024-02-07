@@ -381,9 +381,10 @@ void emux_key_press_interrupt(long key) {
 
 void emux_key_release_interrupt(long key) {
   if (key == KEYCODE_KP_Subtract) {
-    emux_key_interrupt(last_key, 0 /* down */);
+    emux_key_interrupt(last_key, 0 /* up */);
   } else {
-    emux_key_interrupt(key, 0 /* down */);
+    emux_key_interrupt(key, 0 /* up */);
+    last_key = key;
   }
 }
 
