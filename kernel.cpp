@@ -1642,11 +1642,7 @@ int CKernel::circle_gpio_outputs_enabled() {
 }
 
 void CKernel::circle_set_aux_gpio(int index, int enable) {
-  if (enable) {
-    outputGPIOPins[index]->Write(HIGH);
-  } else {
-    outputGPIOPins[index]->Write(LOW);
-  }
+
 }
 
 // Called by cores 1 and 2 after they are done initializing
