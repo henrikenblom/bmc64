@@ -352,6 +352,8 @@ void ViceScreenApp::SetupGPIOForDPI() {
     DPIPins[i] =
         new CGPIOPin(i, GPIOModeAlternateFunction2, &mGPIOManager);
   }
+  outputGPIOPins[0] = new CGPIOPin(26, GPIOModeOutput, &mGPIOManager);
+  outputGPIOPins[1] = new CGPIOPin(27, GPIOModeOutput, &mGPIOManager);
 }
 
 void ViceScreenApp::SetupGPIO() {
