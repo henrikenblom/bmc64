@@ -39,6 +39,11 @@
 void ui_enable_drive_status(ui_drive_enable_t state, int *drive_led_color) {
   int st = state;
   emux_enable_drive_status(st, drive_led_color);
+  if (enabled & 1) {
+    outputGPIOPins[0]->Write(HIGH);
+  } else {
+    outputGPIOPins[0]->Write(LOW);
+  }
 }
 
 // Called by VICE to show drive led

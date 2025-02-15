@@ -281,10 +281,8 @@ static void draw_drive_status(int state, int *drive_led_color) {
       //ui_draw_rect_buf(drive_x[i] + FONT_ADVANCE * 1 + inset_x,
       //   inset_y + 2*SCALE_XY, 6*SCALE_XY, 4*SCALE_XY, BLACK_COLOR,
       //                 1, overlay_buf, overlay_buf_pitch);
-      outputGPIOPins[0]->Write(HIGH);
     } else {
       drive_enabled[i] = 0;
-      outputGPIOPins[0]->Write(LOW);
     }
     enabled >>= 1;
   }
