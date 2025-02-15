@@ -31,6 +31,7 @@
 // VICE includes
 #include "datasette.h"
 #include "uiapi.h"
+#include "viceapp.h"
 
 // RASPI includes
 #include "emux_api.h"
