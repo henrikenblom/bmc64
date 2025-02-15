@@ -348,10 +348,12 @@ void ViceScreenApp::SetupGPIOForInput() {
 
 // Setup GPIO pins for DPI
 void ViceScreenApp::SetupGPIOForDPI() {
-  for (int i = 0; i < 28; i++) {
+  for (int i = 0; i < 25; i++) {
     DPIPins[i] =
         new CGPIOPin(i, GPIOModeAlternateFunction2, &mGPIOManager);
   }
+  outputGPIOPins[0] = new CGPIOPin(26, GPIOModeOutput, &mGPIOManager);
+  outputGPIOPins[1] = new CGPIOPin(27, GPIOModeOutput, &mGPIOManager);
 }
 
 void ViceScreenApp::SetupGPIO() {

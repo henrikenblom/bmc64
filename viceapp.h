@@ -274,7 +274,8 @@ protected:
   CGPIOPin *config_3_userportPins[8];
 
   CGPIOPin *gpioPins[NUM_GPIO_PINS];
-  CGPIOPin *DPIPins[28];
+  CGPIOPin *DPIPins[25];
+  CGPIOPin *outputGPIOPins[2];
 
 private:
   void SetupGPIOForInput();
