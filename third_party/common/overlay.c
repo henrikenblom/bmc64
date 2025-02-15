@@ -292,7 +292,7 @@ static void draw_drive_status(int state, int *drive_led_color) {
 // Enable a drive status lights
 void emux_enable_drive_status(int state, int *drive_led_color) {
   drive_state = state;
-  circle_set_aux_gpio(0, state != 0);
+  circle_set_aux_gpio(0, state == 8);
   if (!overlay_buf)
     return;
 
