@@ -275,6 +275,7 @@ protected:
 
   CGPIOPin *gpioPins[NUM_GPIO_PINS];
   CGPIOPin *DPIPins[25];
+  CGPIOPin *outputGPIOPins[2];
 
 private:
   void SetupGPIOForInput();
@@ -295,7 +296,6 @@ public:
   void circle_find_usb(int (*usb)[3]);
   int circle_mount_usb(int usb);
   int circle_unmount_usb(int usb);
-  CGPIOPin *outputGPIOPins[2];
 
 private:
   // Must be called after fatfs/stdio has been initialized
