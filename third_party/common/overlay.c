@@ -292,7 +292,6 @@ static void draw_drive_status(int state, int *drive_led_color) {
 // Enable a drive status lights
 void emux_enable_drive_status(int state, int *drive_led_color) {
   drive_state = state;
-  circle_set_aux_gpio(0, state);
   if (!overlay_buf)
     return;
 
@@ -305,7 +304,7 @@ void emux_enable_drive_status(int state, int *drive_led_color) {
 static void draw_drive_led(int drive, unsigned int pwm1, unsigned int pwm2) {
   if (!drive_enabled[drive])
      return;
-
+  circle_set_aux_gpio(0, pwm1 > 332);
   // Was i < 2, disabled 2nd LED since it never seems to turn on.
   for (int i = 0; i < 1; i++) {
     unsigned int pwm = i == 0 ? pwm1 : pwm2;
