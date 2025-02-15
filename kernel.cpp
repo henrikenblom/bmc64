@@ -260,6 +260,10 @@ int circle_gpio_outputs_enabled() {
   return static_kernel->circle_gpio_outputs_enabled();
 }
 
+void circle_set_aux_gpio(int index, int enable) {
+  return static_kernel->circle_set_aux_gpio(index, enable);
+}
+
 void circle_kernel_core_init_complete(int core) {
   static_kernel->circle_kernel_core_init_complete(core);
 }
