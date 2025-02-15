@@ -37,7 +37,6 @@
 #include "circle.h"
 #include "keycodes.h"
 #include "kbd.h"
-#include <viceapp.h>
 
 #define ARGB(a,r,g,b) ((uint32_t)((uint8_t)(a)<<24 | (uint8_t)(r)<<16 | (uint8_t)(g)<<8 | (uint8_t)(b)))
 
@@ -294,9 +293,9 @@ static void draw_drive_status(int state, int *drive_led_color) {
 void emux_enable_drive_status(int state, int *drive_led_color) {
   drive_state = state;
   if (state & 1) {
-    outputGPIOPins[0]->Write(HIGH);
+    circle_set_aux_gpio(0, 1);
   } else {
-    outputGPIOPins[0]->Write(LOW);
+    circle_set_aux_gpio(0, 0);
   }
   if (!overlay_buf)
     return;

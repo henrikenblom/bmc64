@@ -228,6 +228,7 @@ extern int circle_get_model();
 extern unsigned circle_get_arm_clock();
 extern int circle_gpio_enabled();
 extern int circle_gpio_outputs_enabled();
+extern void circle_set_aux_gpio(int index, int enable);
 
 extern int circle_sound_init(const char *param, int *speed, int *fragsize,
                         int *fragnr, int *channels);
