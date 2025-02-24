@@ -35,6 +35,7 @@
 #   include <windows.h>
 #elif defined(HAVE_NANOSLEEP)
 #   include <time.h>
+#   include <sys/time.h>
 #else
 #   include <unistd.h>
 #   include <errno.h>
