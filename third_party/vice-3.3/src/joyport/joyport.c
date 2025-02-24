@@ -95,7 +95,6 @@ static int joyport_device_is_single_port(int id)
     switch (id) {
         case JOYPORT_ID_NONE:
         case JOYPORT_ID_JOYSTICK:
-        case JOYPORT_ID_TRAPTHEM_SNESPAD:
         case JOYPORT_ID_BBRTC:
         case JOYPORT_ID_PAPERCLIP64:
         case JOYPORT_ID_SCRIPT64_DONGLE:
@@ -1304,9 +1303,6 @@ static const struct joyport_opt_s id_match[] = {
     { "vizawrite64dongle", JOYPORT_ID_VIZAWRITE64_DONGLE },
     { "waasoft",           JOYPORT_ID_WAASOFT_DONGLE },
     { "waasoftdongle",     JOYPORT_ID_WAASOFT_DONGLE },
-    { "trapthem",          JOYPORT_ID_TRAPTHEM_SNESPAD },
-    { "trapthemsnes",      JOYPORT_ID_TRAPTHEM_SNESPAD },
-    { "trapthemsnespad",   JOYPORT_ID_TRAPTHEM_SNESPAD },
     { "inception",         JOYPORT_ID_INCEPTION },
     { "multijoy",          JOYPORT_ID_MULTIJOY_JOYSTICKS },
     { "protopad",          JOYPORT_ID_PROTOPAD },
