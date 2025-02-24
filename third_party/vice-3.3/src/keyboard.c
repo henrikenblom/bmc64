@@ -35,6 +35,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
+#include "userport/userport_joystick.h"
 
 #ifdef RASPI_COMPILE
 extern void raspi_keymap_changed(int, int, signed long);
