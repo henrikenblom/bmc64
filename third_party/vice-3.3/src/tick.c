@@ -31,21 +31,8 @@
 #include "mainlock.h"
 #include "tick.h"
 
-#ifdef WIN32_COMPILE
-#   include <windows.h>
-#elif defined(HAVE_NANOSLEEP)
-#   include <time.h>
-#   include <sys/time.h>
-#else
-#   include <unistd.h>
-#   include <errno.h>
-#   include <sys/time.h>
-#endif
-
-#ifdef MACOSX_SUPPORT
-#   include <mach/mach.h>
-#   include <mach/mach_time.h>
-#endif
+#include <time.h>
+#include <sys/time.h>
 
 #include <stdio.h>
 
@@ -114,17 +101,6 @@ tick_t tick_now(void)
     return NANO_TO_TICK(((uint64_t)NANO_PER_SECOND * now.tv_sec) + (now.tv_usec * 1000));
 }
 #endif
-
-#ifdef WIN32_COMPILE
-static inline void sleep_impl(tick_t sleep_ticks)
-{
-    LARGE_INTEGER timeout;
-
-    timeout.QuadPart = 0LL - ((NANO_PER_SECOND / 100) * ((double)sleep_ticks / TICK_PER_SECOND));
-
-    SetWaitableTimer(wait_timer, &timeout, 0, NULL, NULL, 0);
-    WaitForSingleObject(wait_timer, INFINITE);
-}
 
 static inline void sleep_impl(tick_t sleep_ticks)
 {
