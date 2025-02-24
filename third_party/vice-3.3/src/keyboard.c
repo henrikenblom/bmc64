@@ -35,7 +35,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
-#include "userport/userport_joystick.h"
 
 #ifdef RASPI_COMPILE
 extern void raspi_keymap_changed(int, int, signed long);
@@ -74,6 +73,8 @@ extern void raspi_keymap_changed(int, int, signed long);
 #endif
 
 #define KEYBOARD_RAND() lib_unsigned_rand(1, machine_get_cycles_per_frame())
+
+#define JOYSTICK_NUM 5
 
 /* Keyboard array.  */
 int keyarr[KBD_ROWS];
