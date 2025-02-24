@@ -121,8 +121,8 @@ am_libjoyport_a_OBJECTS = bbrtc.$(OBJEXT) cardkey.$(OBJEXT) \
 	joystick.$(OBJEXT) lightpen.$(OBJEXT) mouse.$(OBJEXT) \
 	multijoy.$(OBJEXT) \
 	paperclip64.$(OBJEXT) protopad.$(OBJEXT) \
-	sampler4bit.$(OBJEXT) script64_dongle.$(OBJEXT) \
-	spaceballs.$(OBJEXT) trapthem_snespad.$(OBJEXT) \
+	script64_dongle.$(OBJEXT) \
+	trapthem_snespad.$(OBJEXT) \
 	vizawrite64_dongle.$(OBJEXT) waasoft_dongle.$(OBJEXT)
 libjoyport_a_OBJECTS = $(am_libjoyport_a_OBJECTS)
 AM_V_P = $(am__v_P_@AM_V@)
@@ -147,7 +147,7 @@ am__depfiles_remade = ./$(DEPDIR)/bbrtc.Po ./$(DEPDIR)/cardkey.Po \
 	./$(DEPDIR)/joystick.Po ./$(DEPDIR)/lightpen.Po \
 	./$(DEPDIR)/mouse.Po ./$(DEPDIR)/multijoy.Po \
 	./$(DEPDIR)/paperclip64.Po \
-	./$(DEPDIR)/script64_dongle.Po ./$(DEPDIR)/spaceballs.Po \
+	./$(DEPDIR)/script64_dongle.Po \
 	./$(DEPDIR)/trapthem_snespad.Po \
 	./$(DEPDIR)/vizawrite64_dongle.Po \
 	./$(DEPDIR)/waasoft_dongle.Po
@@ -477,8 +477,6 @@ libjoyport_a_SOURCES = \
 	protopad.h \
 	script64_dongle.c \
 	script64_dongle.h \
-	spaceballs.c \
-	spaceballs.h \
 	trapthem_snespad.c \
 	trapthem_snespad.h \
 	vizawrite64_dongle.c \
@@ -549,7 +547,6 @@ distclean-compile:
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/paperclip64.Po@am__quote@ # am--include-marker
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/protopad.Po@am__quote@ # am--include-marker
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/script64_dongle.Po@am__quote@ # am--include-marker
-@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/spaceballs.Po@am__quote@ # am--include-marker
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/trapthem_snespad.Po@am__quote@ # am--include-marker
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/vizawrite64_dongle.Po@am__quote@ # am--include-marker
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/waasoft_dongle.Po@am__quote@ # am--include-marker
@@ -712,7 +709,6 @@ distclean: distclean-am
 	-rm -f ./$(DEPDIR)/paperclip64.Po
 	-rm -f ./$(DEPDIR)/protopad.Po
 	-rm -f ./$(DEPDIR)/script64_dongle.Po
-	-rm -f ./$(DEPDIR)/spaceballs.Po
 	-rm -f ./$(DEPDIR)/trapthem_snespad.Po
 	-rm -f ./$(DEPDIR)/vizawrite64_dongle.Po
 	-rm -f ./$(DEPDIR)/waasoft_dongle.Po
@@ -776,7 +772,6 @@ maintainer-clean: maintainer-clean-am
 	-rm -f ./$(DEPDIR)/paperclip64.Po
 	-rm -f ./$(DEPDIR)/protopad.Po
 	-rm -f ./$(DEPDIR)/script64_dongle.Po
-	-rm -f ./$(DEPDIR)/spaceballs.Po
 	-rm -f ./$(DEPDIR)/trapthem_snespad.Po
 	-rm -f ./$(DEPDIR)/vizawrite64_dongle.Po
 	-rm -f ./$(DEPDIR)/waasoft_dongle.Po

@@ -43,8 +43,6 @@ libjoyport_a_SOURCES = \
 	protopad.h \
 	script64_dongle.c \
 	script64_dongle.h \
-	spaceballs.c \
-	spaceballs.h \
 	trapthem_snespad.c \
 	trapthem_snespad.h \
 	vizawrite64_dongle.c \

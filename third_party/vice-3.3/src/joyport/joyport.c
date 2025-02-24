@@ -636,7 +636,6 @@ static char *joyport_get_joystick_device_name(int port)
     switch (joystick_adapter_get_id()) {
         case JOYSTICK_ADAPTER_ID_NONE:
         case JOYSTICK_ADAPTER_ID_GENERIC_USERPORT:
-        case JOYSTICK_ADAPTER_ID_SPACEBALLS:
         case JOYSTICK_ADAPTER_ID_MULTIJOY:
         case JOYSTICK_ADAPTER_ID_INCEPTION:
             return "Joystick";
@@ -1308,7 +1307,6 @@ static const struct joyport_opt_s id_match[] = {
     { "trapthem",          JOYPORT_ID_TRAPTHEM_SNESPAD },
     { "trapthemsnes",      JOYPORT_ID_TRAPTHEM_SNESPAD },
     { "trapthemsnespad",   JOYPORT_ID_TRAPTHEM_SNESPAD },
-    { "spaceballs",        JOYPORT_ID_SPACEBALLS },
     { "inception",         JOYPORT_ID_INCEPTION },
     { "multijoy",          JOYPORT_ID_MULTIJOY_JOYSTICKS },
     { "protopad",          JOYPORT_ID_PROTOPAD },
