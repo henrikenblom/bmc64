@@ -1201,7 +1201,9 @@ void CKernel::circle_yield(void) { CScheduler::Get()->Yield(); }
 void CKernel::MouseStatusHandler(unsigned nButtons, int deltaX, int deltaY) {
   static unsigned int prev_buttons = {0};
 
-  //emu_mouse_move(deltaX, deltaY);
+  if (!nButtons) {
+    emu_mouse_move(deltaX, deltaY);
+  }
 
   if ((prev_buttons & MOUSE_BUTTON_LEFT) && !(nButtons & MOUSE_BUTTON_LEFT)) {
     emu_mouse_button_left(0);
