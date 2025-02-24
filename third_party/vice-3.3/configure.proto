@@ -269,7 +269,7 @@ fi
 
 AM_CONDITIONAL(VICE_QUIET, test x"$verbose" != "xyes")
 
-user_cflags=$CFLAGS
+user_cflags="$CFLAGS -D_POSIX_C_SOURCE=199309L"
 AC_PROG_CC([gcc clang cc])
 AC_LIB_PROG_LD
 
