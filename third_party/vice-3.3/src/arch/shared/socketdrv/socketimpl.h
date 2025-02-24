@@ -1,5 +1,5 @@
 /*
- * spaceballs.h
+ * socketimpl.h - Socket-specific stuff.
  *
  * Written by
  *  Marco van den Heuvel <blackystardust68@yahoo.com>
@@ -24,11 +24,21 @@
  *
  */
 
-#ifndef VICE_SPACEBALLS_H
-#define VICE_SPACEBALLS_H
+#ifndef VICE_SOCKETIMPL_H
+#define VICE_SOCKETIMPL_H
 
-#include "types.h"
+#include "vice.h"
 
-extern int joyport_spaceballs_resources_init(void);
+#ifdef BEOS_COMPILE
+#include "socket-beos-impl.h"
+#endif
+
+#ifdef UNIX_COMPILE
+#include "socket-unix-impl.h"
+#endif
+
+#ifdef WINDOWS_COMPILE
+#include "socket-win32-impl.h"
+#endif
 
 #endif
