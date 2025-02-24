@@ -121,7 +121,6 @@ am_libjoyport_a_OBJECTS = bbrtc.$(OBJEXT) cardkey.$(OBJEXT) \
 	joystick.$(OBJEXT) lightpen.$(OBJEXT) mouse.$(OBJEXT) \
 	multijoy.$(OBJEXT) ninja_snespad.$(OBJEXT) \
 	paperclip64.$(OBJEXT) protopad.$(OBJEXT) \
-	rushware_keypad.$(OBJEXT) sampler2bit.$(OBJEXT) \
 	sampler4bit.$(OBJEXT) script64_dongle.$(OBJEXT) \
 	spaceballs.$(OBJEXT) trapthem_snespad.$(OBJEXT) \
 	vizawrite64_dongle.$(OBJEXT) waasoft_dongle.$(OBJEXT)
@@ -148,8 +147,6 @@ am__depfiles_remade = ./$(DEPDIR)/bbrtc.Po ./$(DEPDIR)/cardkey.Po \
 	./$(DEPDIR)/joystick.Po ./$(DEPDIR)/lightpen.Po \
 	./$(DEPDIR)/mouse.Po ./$(DEPDIR)/multijoy.Po \
 	./$(DEPDIR)/ninja_snespad.Po ./$(DEPDIR)/paperclip64.Po \
-	./$(DEPDIR)/protopad.Po ./$(DEPDIR)/rushware_keypad.Po \
-	./$(DEPDIR)/sampler2bit.Po ./$(DEPDIR)/sampler4bit.Po \
 	./$(DEPDIR)/script64_dongle.Po ./$(DEPDIR)/spaceballs.Po \
 	./$(DEPDIR)/trapthem_snespad.Po \
 	./$(DEPDIR)/vizawrite64_dongle.Po \
@@ -480,12 +477,6 @@ libjoyport_a_SOURCES = \
 	paperclip64.h \
 	protopad.c \
 	protopad.h \
-	rushware_keypad.c \
-	rushware_keypad.h \
-	sampler2bit.c \
-	sampler2bit.h \
-	sampler4bit.c \
-	sampler4bit.h \
 	script64_dongle.c \
 	script64_dongle.h \
 	spaceballs.c \
@@ -560,9 +551,6 @@ distclean-compile:
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/ninja_snespad.Po@am__quote@ # am--include-marker
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/paperclip64.Po@am__quote@ # am--include-marker
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/protopad.Po@am__quote@ # am--include-marker
-@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/rushware_keypad.Po@am__quote@ # am--include-marker
-@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/sampler2bit.Po@am__quote@ # am--include-marker
-@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/sampler4bit.Po@am__quote@ # am--include-marker
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/script64_dongle.Po@am__quote@ # am--include-marker
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/spaceballs.Po@am__quote@ # am--include-marker
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/trapthem_snespad.Po@am__quote@ # am--include-marker
@@ -727,9 +715,6 @@ distclean: distclean-am
 	-rm -f ./$(DEPDIR)/ninja_snespad.Po
 	-rm -f ./$(DEPDIR)/paperclip64.Po
 	-rm -f ./$(DEPDIR)/protopad.Po
-	-rm -f ./$(DEPDIR)/rushware_keypad.Po
-	-rm -f ./$(DEPDIR)/sampler2bit.Po
-	-rm -f ./$(DEPDIR)/sampler4bit.Po
 	-rm -f ./$(DEPDIR)/script64_dongle.Po
 	-rm -f ./$(DEPDIR)/spaceballs.Po
 	-rm -f ./$(DEPDIR)/trapthem_snespad.Po
@@ -795,9 +780,6 @@ maintainer-clean: maintainer-clean-am
 	-rm -f ./$(DEPDIR)/ninja_snespad.Po
 	-rm -f ./$(DEPDIR)/paperclip64.Po
 	-rm -f ./$(DEPDIR)/protopad.Po
-	-rm -f ./$(DEPDIR)/rushware_keypad.Po
-	-rm -f ./$(DEPDIR)/sampler2bit.Po
-	-rm -f ./$(DEPDIR)/sampler4bit.Po
 	-rm -f ./$(DEPDIR)/script64_dongle.Po
 	-rm -f ./$(DEPDIR)/spaceballs.Po
 	-rm -f ./$(DEPDIR)/trapthem_snespad.Po

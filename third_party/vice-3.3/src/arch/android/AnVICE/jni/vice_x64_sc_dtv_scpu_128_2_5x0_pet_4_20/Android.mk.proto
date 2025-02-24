@@ -193,9 +193,6 @@ LOCAL_SRC_FILES := \
 	$(MY_PATH2)/src/joyport/joystick.c \
 	$(MY_PATH2)/src/joyport/lightpen.c \
 	$(MY_PATH2)/src/joyport/paperclip64.c \
-	$(MY_PATH2)/src/joyport/rushware_keypad.c \
-	$(MY_PATH2)/src/joyport/sampler2bit.c \
-	$(MY_PATH2)/src/joyport/sampler4bit.c \
 	$(MY_PATH2)/src/monitor/asm6502.c \
 	$(MY_PATH2)/src/monitor/mon_assemble6502.c \
 	$(MY_PATH2)/src/monitor/mon_breakpoint.c \

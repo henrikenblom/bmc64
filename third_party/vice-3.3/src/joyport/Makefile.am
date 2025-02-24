@@ -50,12 +50,6 @@ libjoyport_a_SOURCES = \
 	paperclip64.h \
 	protopad.c \
 	protopad.h \
-	rushware_keypad.c \
-	rushware_keypad.h \
-	sampler2bit.c \
-	sampler2bit.h \
-	sampler4bit.c \
-	sampler4bit.h \
 	script64_dongle.c \
 	script64_dongle.h \
 	spaceballs.c \

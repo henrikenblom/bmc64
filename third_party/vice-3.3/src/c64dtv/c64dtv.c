@@ -84,10 +84,7 @@
 #include "ps2mouse.h"
 #include "resources.h"
 #include "rs232drv.h"
-#include "rushware_keypad.h"
 #include "sampler.h"
-#include "sampler2bit.h"
-#include "sampler4bit.h"
 #include "screenshot.h"
 #include "serial.h"
 #include "sid-cmdline-options.h"
@@ -331,14 +328,6 @@ int machine_resources_init(void)
         init_resource_fail("joyport devices");
         return -1;
     }
-    if (joyport_sampler2bit_resources_init() < 0) {
-        init_resource_fail("joyport 2bit sampler");
-        return -1;
-    }
-    if (joyport_sampler4bit_resources_init() < 0) {
-        init_resource_fail("joyport 4bit sampler");
-        return -1;
-    }
     if (joyport_bbrtc_resources_init() < 0) {
         init_resource_fail("joyport bbrtc");
         return -1;
@@ -349,10 +338,6 @@ int machine_resources_init(void)
     }
     if (joyport_coplin_keypad_resources_init() < 0) {
         init_resource_fail("joyport coplin keypad");
-        return -1;
-    }
-    if (joyport_rushware_keypad_resources_init() < 0) {
-        init_resource_fail("joyport rushware keypad");
         return -1;
     }
     if (joystick_resources_init() < 0) {
