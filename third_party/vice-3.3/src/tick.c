@@ -25,6 +25,7 @@
  *
  */
 #define _POSIX_C_SOURCE 199309L
+#define HAVE_NANOSLEEP 1
 #include "vice.h"
 
 #include "mainlock.h"
@@ -99,7 +100,7 @@ tick_t tick_now(void)
 #else
 tick_t tick_now(void)
 {
-    struct timespec now;
+    struct timeval now;
     
 #if defined(__linux__)
     clock_gettime(CLOCK_MONOTONIC_RAW, &now);
