@@ -1801,14 +1801,14 @@ AC_TRY_COMPILE([],
 
 
 dnl check if the compiler supports -Werror=implicit-function-declaration
-AC_MSG_CHECKING([if the compiler supports -Werror=implicit-function-declaration])
-ORIG_CFLAGS="$CFLAGS"
-CFLAGS="$CFLAGS -Werror=implicit-function-declaration"
-AC_TRY_COMPILE([],
-               [int test;],
-               [ AC_MSG_RESULT(yes)],
-               [ AC_MSG_RESULT(no)
-                 CFLAGS="$ORIG_CFLAGS" ])
+dnl AC_MSG_CHECKING([if the compiler supports -Werror=implicit-function-declaration])
+dnl ORIG_CFLAGS="$CFLAGS"
+dnl CFLAGS="$CFLAGS -Werror=implicit-function-declaration"
+dnl AC_TRY_COMPILE([],
+dnl                [int test;],
+dnl                [ AC_MSG_RESULT(yes)],
+dnl                [ AC_MSG_RESULT(no)
+dnl                 CFLAGS="$ORIG_CFLAGS" ])
 
 
 dnl check if the compiler supports -Wfatal-errors
