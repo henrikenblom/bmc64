@@ -111,7 +111,7 @@ tick_t tick_now(void)
   gettimeofday(&now, NULL);
 #endif
 
-    return NANO_TO_TICK(((uint64_t)NANO_PER_SECOND * now.tv_sec) + now.tv_nsec);
+    return NANO_TO_TICK(((uint64_t)NANO_PER_SECOND * now.tv_sec) + (now.tv_usec * 1000));
 }
 #endif
 
