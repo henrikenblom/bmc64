@@ -24,7 +24,7 @@
  *  02111-1307  USA.
  *
  */
-
+#define _POSIX_C_SOURCE 199309L
 #include "vice.h"
 
 #include "mainlock.h"
