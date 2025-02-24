@@ -55,6 +55,7 @@
 #include "vice.h"
 
 #include "archdep.h"
+#include "archdep_tick.h"
 #include "cmdline.h"
 #include "joyport.h"
 #include "machine.h"
