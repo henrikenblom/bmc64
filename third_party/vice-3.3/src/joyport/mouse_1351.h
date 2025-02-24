@@ -25,6 +25,8 @@
  *
  */
 
+#include <stdint.h>
+
 #ifndef VICE_1351_H
 #define VICE_1351_H
 
