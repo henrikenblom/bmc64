@@ -28,6 +28,8 @@
  *
  */
 
+#define DEBUGCART
+
 #include "vice.h"
 
 #include <stdio.h>
@@ -38,6 +40,7 @@
 #include "cartio.h"
 #include "cartridge.h"
 #include "cmdline.h"
+#include "crt.h"
 #include "export.h"
 #include "flash040.h"
 #include "lib.h"
@@ -46,6 +49,7 @@
 #include "maincpu.h"
 #include "mem.h"
 #include "monitor.h"
+#include "ram.h"
 #include "resources.h"
 #include "snapshot.h"
 #include "types.h"
@@ -55,6 +59,18 @@
 #include "vic20cartmem.h"
 #include "vic20mem.h"
 #include "zfile.h"
+
+#ifdef DEBUGCART
+#define DBG(x) printf x
+#else
+#define DBG(x)
+#endif
+
+/*
+   UltiMem by Retro Innovations
+
+   see http://www.go4retro.com/products/ultimem/
+*/
 
 /* ------------------------------------------------------------------------- */
 /*
@@ -72,8 +88,9 @@ static uint8_t *cart_ram = NULL;
 static size_t cart_rom_size;
 static uint8_t *cart_rom = NULL;
 #define CART_ROM_SIZE_8M (8 << 20)
+#define CART_ROM_SIZE_16M (16 << 20)
 #define CART_ROM_SIZE_512K (512 << 10)
-#define CART_ROM_SIZE_MAX CART_ROM_SIZE_8M
+#define CART_ROM_SIZE_MAX CART_ROM_SIZE_16M
 
 #define ultimem_reg0_regs_disable 0x80
 #define ultimem_reg0_led 1
@@ -87,7 +104,7 @@ static uint8_t ultimem[17];
 
 /** Used bits in ultimem[] */
 static const uint8_t ultimem_mask[16] = {
-    ultimem_reg0_regs_disable | ultimem_reg0_led,
+    0xc7,
     0x3f, /* 00:IO3 config:IO2 config:RAM123 config */
     0xff, /* BLK5:BLK3:BLK2:BLK1 */
     0,
@@ -136,11 +153,11 @@ static flash040_context_t flash_state;
 /* ------------------------------------------------------------------------- */
 
 static int vic_um_writeback;
-static char *cartfile = NULL;   /* perhaps the one in vic20cart.c could
-                                   be used instead? */
 
-static log_t um_log = LOG_ERR;
+static log_t um_log = LOG_DEFAULT;
 
+static char *vic_um_filename = NULL;
+static int vic_um_filetype = 0;
 /* ------------------------------------------------------------------------- */
 
 /* Some prototypes are needed */
@@ -153,40 +170,46 @@ static void vic_um_io3_store(uint16_t addr, uint8_t value);
 static int vic_um_mon_dump(void);
 
 static io_source_t ultimem_io2 = {
-    CARTRIDGE_VIC20_NAME_UM,
-    IO_DETACH_CART,
-    "I/O2",
-    0x9800, 0x9bff, 0x3ff,
-    0,
-    vic_um_io2_store,
-    vic_um_io2_read,
-    vic_um_io2_peek,
-    NULL,
-    CARTRIDGE_VIC20_UM,
-    0,
-    0
+    CARTRIDGE_VIC20_NAME_UM, /* name of the device */
+    IO_DETACH_CART,          /* use cartridge ID to detach the device when involved in a read-collision */
+    IO_DETACH_NO_RESOURCE,   /* does not use a resource for detach */
+    0x9800, 0x9bff, 0x3ff,   /* range for the device, regs:$9800-$9bff */
+    0,                       /* read validity is determined by the device upon a read */
+    vic_um_io2_store,        /* store function */
+    NULL,                    /* NO poke function */
+    vic_um_io2_read,         /* read function */
+    vic_um_io2_peek,         /* peek function */
+    NULL,                    /* TODO: device state information dump function */
+    CARTRIDGE_VIC20_UM,      /* cartridge ID */
+    IO_PRIO_NORMAL,          /* normal priority, device read needs to be checked for collisions */
+    0,                       /* insertion order, gets filled in by the registration function */
+    IO_MIRROR_NONE           /* NO mirroring */
 };
 
 static io_source_t ultimem_io3 = {
-    CARTRIDGE_VIC20_NAME_UM,
-    IO_DETACH_CART,
-    "I/O3",
-    0x9c00, 0x9fff, 0x3ff,
-    0,
-    vic_um_io3_store,
-    vic_um_io3_read,
-    vic_um_io3_peek,
-    vic_um_mon_dump,
-    CARTRIDGE_VIC20_UM,
-    0,
-    0
+    CARTRIDGE_VIC20_NAME_UM, /* name of the device */
+    IO_DETACH_CART,          /* use cartridge ID to detach the device when involved in a read-collision */
+    IO_DETACH_NO_RESOURCE,   /* does not use a resource for detach */
+    0x9c00, 0x9fff, 0x3ff,   /* range for the device, regs:$9c00-$9fff */
+    0,                       /* read validity is determined by the device upon a read */
+    vic_um_io3_store,        /* store function */
+    NULL,                    /* NO poke function */
+    vic_um_io3_read,         /* read function */
+    vic_um_io3_peek,         /* peek function */
+    vic_um_mon_dump,         /* device state information dump function */
+    CARTRIDGE_VIC20_UM,      /* cartridge ID */
+    IO_PRIO_NORMAL,          /* normal priority, device read needs to be checked for collisions */
+    0,                       /* insertion order, gets filled in by the registration function */
+    IO_MIRROR_NONE           /* NO mirroring */
 };
 
 static io_source_list_t *io2_list_item = NULL;
 static io_source_list_t *io3_list_item = NULL;
 
 static const export_resource_t export_res = {
-    CARTRIDGE_VIC20_NAME_UM, 0, 0, &ultimem_io2, &ultimem_io2, CARTRIDGE_VIC20_UM
+    CARTRIDGE_VIC20_NAME_UM, 0,
+    VIC_CART_RAM123 | VIC_CART_BLK1 | VIC_CART_BLK2 | VIC_CART_BLK3 | VIC_CART_BLK5,
+    &ultimem_io2, &ultimem_io3, CARTRIDGE_VIC20_UM
 };
 
 /* ------------------------------------------------------------------------- */
@@ -525,6 +548,9 @@ static void vic_um_io3_store(uint16_t addr, uint8_t value)
         switch (addr) {
             case 0:
                 value |= ultimem_reset[0];
+                if (value & 0x40) {
+                    machine_trigger_reset(MACHINE_RESET_MODE_POWER_CYCLE);
+                }
                 break;
             case 3:
                 return; /* not writable */
@@ -560,9 +586,30 @@ static void vic_um_io3_store(uint16_t addr, uint8_t value)
 
 /* ------------------------------------------------------------------------- */
 
+/* FIXME: this still needs to be tweaked to match the hardware */
+static RAMINITPARAM ramparam = {
+    .start_value = 255,
+    .value_invert = 2,
+    .value_offset = 1,
+
+    .pattern_invert = 0x100,
+    .pattern_invert_value = 255,
+
+    .random_start = 0,
+    .random_repeat = 0,
+    .random_chance = 0,
+};
+
+void vic_um_powerup(void)
+{
+    if (cart_ram) {
+        ram_init_with_pattern(cart_ram, (unsigned int)cart_ram_size, &ramparam);
+    }
+}
+
 void vic_um_init(void)
 {
-    if (um_log == LOG_ERR) {
+    if (um_log == LOG_DEFAULT) {
         um_log = log_open(CARTRIDGE_VIC20_NAME_UM);
     }
 }
@@ -570,34 +617,122 @@ void vic_um_init(void)
 void vic_um_reset(void)
 {
     flash040core_reset(&flash_state);
-    memcpy(ultimem, ultimem_reset, sizeof ultimem);
-    switch (cart_rom_size) {
-        case CART_ROM_SIZE_8M:
-            ultimem[3] = ultimem_reg3_8m;
-            break;
-        case CART_ROM_SIZE_512K:
-            ultimem[3] = ultimem_reg3_512k;
-            break;
+    if (ultimem[0] & 0x40) {
+        /* soft reset triggered by write to $9ff0 */
+        ultimem[0] &= ~0x40;
+    } else {
+        memcpy(ultimem, ultimem_reset, sizeof ultimem);
+        switch (cart_rom_size) {
+            case CART_ROM_SIZE_8M:
+                ultimem[3] = ultimem_reg3_8m;
+                break;
+            case CART_ROM_SIZE_512K:
+                ultimem[3] = ultimem_reg3_512k;
+                break;
+        }
     }
 }
 
 void vic_um_config_setup(uint8_t *rawcart)
 {
+    memcpy(ultimem, ultimem_reset, sizeof ultimem);
 }
+
+int vic_um_crt_attach(FILE *fd, uint8_t *rawcart, const char *filename)
+{
+    crt_chip_header_t chip;
+    int idx = 0;
+
+    /* util_string_set(&cartfile, filename); */ /* FIXME */
+    vic_um_filetype = 0;
+    vic_um_filename = NULL;
+
+    if (!cart_ram) {
+        cart_ram = lib_malloc(CART_RAM_SIZE_MAX);
+    }
+
+    if (!cart_rom) {
+        cart_rom = lib_malloc(CART_ROM_SIZE_MAX);
+    }
+
+    cart_rom_size = 0;
+
+    for (idx = 0; idx < 2048; idx++) {
+        if (crt_read_chip_header(&chip, fd)) {
+            break;
+        }
+
+        DBG(("chip %d at %02x len %02x\n", idx, chip.start, chip.size));
+        if (chip.size != 0x2000) {
+            goto exiterror;
+        }
+
+        if (crt_read_chip(&cart_rom[0x2000 * idx], 0, &chip, fd)) {
+            goto exiterror;
+        }
+        cart_rom_size += 0x2000;
+    }
+
+    switch (cart_rom_size) {
+        case CART_ROM_SIZE_16M:
+            /* FIXME: is this correct? */
+            cart_ram_size = CART_RAM_SIZE_1M;
+            break;
+        case CART_ROM_SIZE_8M:
+            cart_ram_size = CART_RAM_SIZE_1M;
+            break;
+        case CART_ROM_SIZE_512K:
+            cart_ram_size = CART_RAM_SIZE_512K;
+            break;
+        default:
+            goto exiterror;
+    }
+
+    if (export_add(&export_res) < 0) {
+        goto exiterror;
+    }
+
+    flash040core_init(&flash_state, maincpu_alarm_context,
+                      (cart_rom_size == CART_ROM_SIZE_512K) ? FLASH040_TYPE_B : FLASH040_TYPE_064,
+                      cart_rom);
+
+    mem_cart_blocks = VIC_CART_RAM123 |
+                      VIC_CART_BLK1 | VIC_CART_BLK2 | VIC_CART_BLK3 | VIC_CART_BLK5 |
+                      VIC_CART_IO2 | VIC_CART_IO3;
+    mem_initialize_memory();
+
+    io2_list_item = io_source_register(&ultimem_io2);
+    io3_list_item = io_source_register(&ultimem_io3);
+
+    vic_um_filetype = CARTRIDGE_FILETYPE_CRT;
+    vic_um_filename = lib_strdup(filename);
+
+    return 0;
+
+exiterror:
+    vic_um_detach();
+    return -1;
+}
+
 
 int vic_um_bin_attach(const char *filename)
 {
     FILE *fd = zfile_fopen(filename, MODE_READ);
 
-    util_string_set(&cartfile, filename);
+    vic_um_filetype = 0;
+    vic_um_filename = NULL;
 
     if (!fd) {
         vic_um_detach();
         return -1;
     }
-    cart_rom_size = util_file_length(fd);
+    cart_rom_size = archdep_file_size(fd);
 
     switch (cart_rom_size) {
+        case CART_ROM_SIZE_16M:
+            /* FIXME: is this correct? */
+            cart_ram_size = CART_RAM_SIZE_1M;
+            break;
         case CART_ROM_SIZE_8M:
             cart_ram_size = CART_RAM_SIZE_1M;
             break;
@@ -642,44 +777,28 @@ int vic_um_bin_attach(const char *filename)
     io2_list_item = io_source_register(&ultimem_io2);
     io3_list_item = io_source_register(&ultimem_io3);
 
+    vic_um_filetype = CARTRIDGE_FILETYPE_BIN;
+    vic_um_filename = lib_strdup(filename);
+
     return 0;
 }
 
 void vic_um_detach(void)
 {
-    int n = 0;
-    FILE *fd;
-
     /* try to write back cartridge contents if write back is enabled
        and cartridge wasn't from a snapshot */
     if (vic_um_writeback && !cartridge_is_from_snapshot) {
-        if (flash_state.flash_dirty) {
-            log_message(um_log, "Flash dirty, trying to write back...");
-            fd = fopen(cartfile, "wb");
-            if (fd) {
-                n = fwrite(flash_state.flash_data, cart_rom_size, 1, fd);
-                fclose(fd);
-            }
-            if (n < 1) {
-                log_message(um_log, "Failed to write back image `%s'!",
-                            cartfile);
-            } else {
-                log_message(um_log, "Wrote back image `%s'.",
-                            cartfile);
-            }
-        } else {
-            log_message(um_log, "Flash clean, skipping write back.");
-        }
+        vic_um_flush_image();
     }
 
     mem_cart_blocks = 0;
     mem_initialize_memory();
     lib_free(cart_ram);
     lib_free(cart_rom);
-    lib_free(cartfile);
     cart_ram = NULL;
     cart_rom = NULL;
-    cartfile = NULL;
+    lib_free(vic_um_filename);
+    vic_um_filename = NULL;
 
     export_remove(&export_res);
 
@@ -691,6 +810,86 @@ void vic_um_detach(void)
         io_source_unregister(io3_list_item);
         io3_list_item = NULL;
     }
+}
+
+int vic_um_bin_save(const char *filename)
+{
+    FILE *fd;
+
+    if (filename == NULL) {
+        return -1;
+    }
+
+    fd = fopen(filename, MODE_WRITE);
+
+    if (fd == NULL) {
+        return -1;
+    }
+
+        if (fwrite(flash_state.flash_data, 1, cart_rom_size, fd) != cart_rom_size) {
+            fclose(fd);
+            return -1;
+        }
+
+    fclose(fd);
+
+    return 0;
+}
+
+int vic_um_crt_save(const char *filename)
+{
+    log_error(LOG_DEFAULT, "FIXME: vic_um_crt_save not implemented");
+    FILE *fd;
+    crt_chip_header_t chip;
+    uint8_t *data;
+    int i;
+
+    fd = crt_create_vic20(filename, CARTRIDGE_VIC20_UM, 0, CARTRIDGE_VIC20_NAME_UM);
+
+    if (fd == NULL) {
+        return -1;
+    }
+
+    chip.type = 2;
+    chip.size = 0x2000;
+    chip.start = 0xa000;
+
+    data = flash_state.flash_data;
+
+    for (i = 0; i < (cart_rom_size / chip.size); i++) {
+        chip.bank = i; /* bank */
+
+        if (crt_write_chip(data, &chip, fd)) {
+            fclose(fd);
+            return -1;
+        }
+        data += chip.size;
+    }
+
+    fclose(fd);
+
+    return 0;
+}
+
+int vic_um_flush_image(void)
+{
+    int ret = 0;
+    if (flash_state.flash_dirty) {
+        log_message(um_log, "Flash dirty, trying to write back...");
+        if (vic_um_filetype == CARTRIDGE_FILETYPE_BIN) {
+            ret = vic_um_bin_save(vic_um_filename);
+        } else if (vic_um_filetype == CARTRIDGE_FILETYPE_CRT) {
+            ret = vic_um_crt_save(vic_um_filename);
+        }
+        if (ret < 1) {
+            log_message(um_log, "Failed to write back image `%s'!", vic_um_filename);
+        } else {
+            log_message(um_log, "Wrote back image `%s'.", vic_um_filename);
+        }
+    } else {
+        log_message(um_log, "Flash clean, skipping write back.");
+    }
+    return ret;
 }
 
 /* ------------------------------------------------------------------------- */
@@ -753,8 +952,8 @@ int vic_um_snapshot_write_module(snapshot_t *s)
 
     if (0
         || (SMW_BA(m, ultimem, sizeof ultimem) < 0)
-        || (SMW_BA(m, cart_ram, cart_ram_size) < 0)
-        || (SMW_BA(m, cart_rom, cart_rom_size) < 0)) {
+        || (SMW_BA(m, cart_ram, (unsigned int)cart_ram_size) < 0)
+        || (SMW_BA(m, cart_rom, (unsigned int)cart_rom_size) < 0)) {
         snapshot_module_close(m);
         return -1;
     }
@@ -814,8 +1013,8 @@ int vic_um_snapshot_read_module(snapshot_t *s)
     }
 
     if (0
-        || (SMR_BA(m, cart_ram, cart_ram_size) < 0)
-        || (SMR_BA(m, cart_rom, cart_rom_size) < 0)) {
+        || (SMR_BA(m, cart_ram, (unsigned int)cart_ram_size) < 0)
+        || (SMR_BA(m, cart_rom, (unsigned int)cart_rom_size) < 0)) {
         goto snapshot_error;
     }
 
@@ -838,6 +1037,13 @@ int vic_um_snapshot_read_module(snapshot_t *s)
                       VIC_CART_BLK1 | VIC_CART_BLK2 | VIC_CART_BLK3 | VIC_CART_BLK5 |
                       VIC_CART_IO2 | VIC_CART_IO3;
     mem_initialize_memory();
+
+    io2_list_item = io_source_register(&ultimem_io2);
+    io3_list_item = io_source_register(&ultimem_io3);
+
+    /* set filetype to none */
+    vic_um_filename = NULL;
+    vic_um_filetype = 0;
 
     return 0;
 }

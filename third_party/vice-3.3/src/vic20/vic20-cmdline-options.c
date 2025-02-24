@@ -49,8 +49,11 @@ struct model_s {
 static struct model_s model_match[] = {
     { "vic20", VIC20MODEL_VIC20_PAL },
     { "vic20pal", VIC20MODEL_VIC20_PAL },
+    { "pal", VIC20MODEL_VIC20_PAL },
     { "vic20ntsc", VIC20MODEL_VIC20_NTSC },
+    { "ntsc", VIC20MODEL_VIC20_NTSC },
     { "vic21", VIC20MODEL_VIC21 },
+    { "vic1001", VIC20MODEL_VIC1001 },
     { NULL, VIC20MODEL_UNKNOWN }
 };
 
@@ -151,7 +154,7 @@ static int cmdline_memory(const char *param, void *extra_param)
                        || strcmp(opt, "A0") == 0) {
                 memconf |= VIC_BLK5;
             } else {
-                log_error(LOG_ERR,
+                log_error(LOG_DEFAULT,
                           "Unsupported memory extension option: `%s'.", opt);
                 lib_free(opt);
                 return -1;

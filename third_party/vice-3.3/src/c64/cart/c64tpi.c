@@ -91,18 +91,20 @@ static uint8_t tpi_io2_peek(uint16_t addr);
 static int tpi_io2_dump(void);
 
 static io_source_t tpi_io2_device = {
-    CARTRIDGE_NAME_IEEE488,
-    IO_DETACH_CART,
-    NULL,
-    0xdf00, 0xdfff, 0x07,
-    1, /* read is always valid */
-    tpi_io2_store,
-    tpi_io2_read,
-    tpi_io2_peek,
-    tpi_io2_dump,
-    CARTRIDGE_IEEE488,
-    0,
-    0
+    CARTRIDGE_NAME_IEEE488, /* name of the device */
+    IO_DETACH_CART,         /* use cartridge ID to detach the device when involved in a read-collision */
+    IO_DETACH_NO_RESOURCE,  /* does not use a resource for detach */
+    0xdf00, 0xdfff, 0x07,   /* range for the device, regs:$df00-$df07, mirrors:$df08-$dfff */
+    1,                      /* read is always valid */
+    tpi_io2_store,          /* store function */
+    NULL,                   /* NO poke function */
+    tpi_io2_read,           /* read function */
+    tpi_io2_peek,           /* peek function */
+    tpi_io2_dump,           /* device state information dump function */
+    CARTRIDGE_IEEE488,      /* cartridge ID */
+    IO_PRIO_NORMAL,         /* normal priority, device read needs to be checked for collisions */
+    0,                      /* insertion order, gets filled in by the registration function */
+    IO_MIRROR_NONE          /* NO mirroring */
 };
 
 static io_source_list_t *tpi_list_item = NULL;
@@ -453,18 +455,20 @@ static int set_ieee488_enabled(int value, void *param)
         }
         if (param) {
             /* if the param is != NULL, then we should load the default image file */
-            if (ieee488_filename) {
-                if (*ieee488_filename) {
-                    DBG(("IEEE: attach default image\n"));
-                    if (cartridge_attach_image(CARTRIDGE_IEEE488, ieee488_filename) < 0) {
-                        DBG(("IEEE: set_enabled did not register\n"));
-                        lib_free(tpi_rom);
-                        tpi_rom = NULL;
-                        return -1;
-                    }
-                    /* ieee488_enabled = 1; */ /* cartridge_attach_image will end up calling set_ieee488_enabled again */
-                    return 0;
+            if ((ieee488_filename != NULL) && (*ieee488_filename != 0)) {
+                DBG(("IEEE: attach default image\n"));
+                /* try crt first, then binary */
+                if ((cartridge_attach_image(CARTRIDGE_CRT, ieee488_filename) < 0) &&
+                    (cartridge_attach_image(CARTRIDGE_IEEE488, ieee488_filename) < 0)) {
+                    DBG(("IEEE: set_enabled did not register\n"));
+                    lib_free(tpi_rom);
+                    tpi_rom = NULL;
+                    return -1; /* loading the default was requested, but file could not be loaded */
                 }
+                /* ieee488_enabled = 1; */ /* cartridge_attach_image will end up calling set_ieee488_enabled again */
+                return 0;
+            } else {
+                return -1; /* loading the default was requested, but no filename was set */
             }
         } else {
             cart_power_off();
@@ -503,7 +507,7 @@ static int set_ieee488_filename(const char *name, void *param)
     if (set_ieee488_enabled(enabled, (void*)1) < 0) {
         lib_free(ieee488_filename);
         ieee488_filename = NULL;
-        DBG(("IEEE: set_name done: %d '%s'\n", ieee488_enabled, ieee488_filename));
+        DBG(("IEEE: set_name done: %d 'NULL'\n", ieee488_enabled));
         return -1;
     }
 
@@ -618,10 +622,11 @@ int tpi_bin_attach(const char *filename, uint8_t *rawcart)
     if (util_file_load(filename, rawcart, TPI_ROM_SIZE, UTIL_FILE_LOAD_SKIP_ADDRESS) < 0) {
         return -1;
     }
+    set_ieee488_filename(filename, NULL); /* set the resource */
     return tpi_common_attach();
 }
 
-int tpi_crt_attach(FILE *fd, uint8_t *rawcart)
+int tpi_crt_attach(FILE *fd, uint8_t *rawcart, const char *filename)
 {
     crt_chip_header_t chip;
 
@@ -637,6 +642,7 @@ int tpi_crt_attach(FILE *fd, uint8_t *rawcart)
         return -1;
     }
 
+    set_ieee488_filename(filename, NULL); /* set the resource */
     return tpi_common_attach();
 }
 

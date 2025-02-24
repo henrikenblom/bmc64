@@ -41,7 +41,7 @@
 /* #define LOG_COMMANDS */ /* log eeprom commands */
 
 #ifdef EEPROMDEBUG
-#define LOG(_x_) log_debug _x_
+#define LOG(_x_) log_printf  _x_
 #else
 #define LOG(_x_)
 #endif
@@ -67,6 +67,10 @@ static unsigned int eeprom_status = 0;
 
 static unsigned int eeprom_readbit = 0;
 
+static const uint8_t bits[8] = {
+    0x80, 0x40, 0x20, 0x10, 0x08, 0x04, 0x02, 0x01
+};
+
 
 /* TODO */
 void eeprom_data_readadvance(void)
@@ -83,7 +87,6 @@ uint8_t eeprom_data_readbyte(void)
 uint8_t eeprom_data_readbit(void)
 {
     uint8_t value;
-    static uint8_t bits[8] = { 0x80, 0x40, 0x20, 0x10, 0x08, 0x04, 0x02, 0x01 };
     int bitpos;
     bitpos = eeprom_readpos & 7;
     value = eeprom_data_readbyte();
@@ -130,7 +133,6 @@ void eeprom_cmd_reset (void)
 
 void eeprom_cmd_write(uint8_t value)
 {
-    static uint8_t bits[8] = { 0x80, 0x40, 0x20, 0x10, 0x08, 0x04, 0x02, 0x01 };
 /*LOG(("EEPROM: eeprom_cmd_write bit: %d:%02x",eeprom_cmdbit,value));*/
     if (value) {
         eeprom_cmdval |= bits[eeprom_cmdbit];
@@ -164,8 +166,7 @@ void eeprom_seq_reset(void)
 
 void eeprom_seq_write(uint8_t value)
 {
-    static uint8_t bits[8] = { 0x80, 0x40, 0x20, 0x10, 0x08, 0x04, 0x02, 0x01 };
-/*LOG(("EEPROM: eeprom_seq_write bit: %d:%02x",eeprom_seqbit,value));*/
+    /*LOG(("EEPROM: eeprom_seq_write bit: %d:%02x",eeprom_seqbit,value));*/
     if (value) {
         eeprom_seqval |= bits[eeprom_seqbit];
         eeprom_seqbuf[eeprom_seqpos] = eeprom_seqval;
@@ -390,7 +391,7 @@ int eeprom_open_image(char *name, int rw)
         /* FIXME */
     } else {
         /* FIXME */
-        log_debug("eeprom card image name not set");
+        log_debug(LOG_DEFAULT, "eeprom card image name not set");
         return 0;
     }
 
@@ -406,21 +407,21 @@ int eeprom_open_image(char *name, int rw)
         eeprom_image_file = fopen(eeprom_image_filename, "rb");
 
         if (eeprom_image_file == NULL) {
-            log_debug("could not open eeprom card image: %s", eeprom_image_filename);
+            log_debug(LOG_DEFAULT, "could not open eeprom card image: %s", eeprom_image_filename);
             return -1;
         } else {
             if (fread(eeprom_data, 1, EEPROM_SIZE, eeprom_image_file) == 0) {
-                log_debug("could not read eeprom card image: %s", eeprom_image_filename);
+                log_debug(LOG_DEFAULT, "could not read eeprom card image: %s", eeprom_image_filename);
             }
             fseek(eeprom_image_file, 0, SEEK_SET);
-            log_debug("opened eeprom card image (ro): %s", eeprom_image_filename);
+            log_debug(LOG_DEFAULT, "opened eeprom card image (ro): %s", eeprom_image_filename);
         }
     } else {
         if (fread(eeprom_data, 1, EEPROM_SIZE, eeprom_image_file) == 0) {
-            log_debug("could not read eeprom card image: %s", eeprom_image_filename);
+            log_debug(LOG_DEFAULT, "could not read eeprom card image: %s", eeprom_image_filename);
         }
         fseek(eeprom_image_file, 0, SEEK_SET);
-        log_debug("opened eeprom card image (rw): %s", eeprom_image_filename);
+        log_debug(LOG_DEFAULT, "opened eeprom card image (rw): %s", eeprom_image_filename);
     }
     return 0;
 }
@@ -432,7 +433,7 @@ void eeprom_close_image(int rw)
         if (rw) {
             fseek(eeprom_image_file, 0, SEEK_SET);
             if (fwrite(eeprom_data, 1, EEPROM_SIZE, eeprom_image_file) == 0) {
-                log_debug("could not write eeprom card image");
+                log_debug(LOG_DEFAULT, "could not write eeprom card image");
             }
         }
         fclose(eeprom_image_file);
@@ -450,8 +451,6 @@ void eeprom_close_image(int rw)
 /* FIXME: implement snapshot support */
 int eeprom_snapshot_write_module(snapshot_t *s)
 {
-    return -1;
-#if 0
     snapshot_module_t *m;
 
     m = snapshot_module_create(s, SNAP_MODULE_NAME,
@@ -460,6 +459,9 @@ int eeprom_snapshot_write_module(snapshot_t *s)
         return -1;
     }
 
+    snapshot_set_error(SNAPSHOT_MODULE_NOT_IMPLEMENTED);
+    return -1;
+#if 0
     if (0) {
         snapshot_module_close(m);
         return -1;

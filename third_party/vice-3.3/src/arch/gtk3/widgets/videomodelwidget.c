@@ -5,10 +5,11 @@
  */
 
 /*
- * FIXME:   This widget get's its resource name from another widget, so its
+ * FIXME:   This widget gets its resource name from another widget, so its
  *          a little more involved to figure out exacly what resources are
  *          set for which video chip.
  * Controls the following resource(s):
+ * $VICERES MachineVideoStandard all
  */
 
 /*
@@ -36,8 +37,7 @@
 
 #include <gtk/gtk.h>
 
-#include "widgethelpers.h"
-#include "debug_gtk3.h"
+#include "vice_gtk3.h"
 #include "resources.h"
 #include "machine.h"
 #include "log.h"
@@ -45,13 +45,28 @@
 #include "videomodelwidget.h"
 
 
+/** \brief  Title for the widget
+ *
+ * Set once via ${emu}ui.c during UI initialization.
+ */
 static const char *widget_title = NULL;
+
+/** \brief  Name of the video model resource
+ *
+ * Set once via ${emu}ui.c during UI initialization.
+ */
 static const char *resource_name = NULL;
+
+/** \brief  List of video models
+ *
+ * Set once via ${emu}ui.c during UI initialization.
+ */
 static const vice_gtk3_radiogroup_entry_t *model_list = NULL;
-static GtkWidget *machine_widget = NULL;
 
 
 /** \brief  Get index in model list for model-ID \a model
+ *
+ * \param[in]   model   model index
  *
  * \return  index in list or -1 when not found
  */
@@ -59,7 +74,6 @@ static int get_model_index(int model)
 {
     return vice_gtk3_radiogroup_get_list_index(model_list, model);
 }
-
 
 /** \brief  Handler for the "toggled" event of the model radio buttons
  *
@@ -71,10 +85,10 @@ static void on_model_toggled(GtkWidget *widget, gpointer user_data)
     int model_id = GPOINTER_TO_INT(user_data);
 
     if (gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(widget))) {
-        debug_gtk3("setting '%s' to %d.", resource_name, model_id);
         if (resources_set_int(resource_name, model_id) < 0) {
-            log_error(LOG_ERR, "failed to set %s to %d\n",
-                    resource_name, model_id);
+            log_error(LOG_DEFAULT,
+                      "%s(): failed to set %s to %d\n",
+                      __func__, resource_name, model_id);
         } else {
             GtkWidget *parent;
             void (*callback)(int);
@@ -83,7 +97,6 @@ static void on_model_toggled(GtkWidget *widget, gpointer user_data)
             if (parent != NULL) {
                 callback = g_object_get_data(G_OBJECT(parent), "ExtraCallback");
                 if (callback != NULL) {
-                    debug_gtk3("triggering extra callback with %d.", model_id);
                     callback(model_id);
                 }
             }
@@ -93,6 +106,8 @@ static void on_model_toggled(GtkWidget *widget, gpointer user_data)
 
 
 /** \brief  Set title of the widget
+ *
+ * Called from the ${emu}ui.c file.
  *
  * \param[in]   title   title for the widget
  */
@@ -133,29 +148,38 @@ void video_model_widget_set_models(const vice_gtk3_radiogroup_entry_t *models)
 GtkWidget *video_model_widget_create(GtkWidget *machine)
 {
     GtkWidget *grid;
-    GtkWidget *radio;
-    GtkRadioButton *last = NULL;
-    GSList *group = NULL;
-    int i;
+    GtkWidget *label;
+    char       title[64];
+    int        row = 0;
 
-    machine_widget = machine;
-    grid = uihelpers_create_grid_with_label(widget_title, 1);
+    grid = gtk_grid_new();
+
+    g_snprintf(title, sizeof title, "<b>%s</b>", widget_title);
+    label = gtk_label_new(NULL);
+    gtk_label_set_markup(GTK_LABEL(label), title);
+    gtk_widget_set_halign(label, GTK_ALIGN_START);
+    gtk_widget_set_margin_bottom(label, 8);
+    gtk_grid_attach(GTK_GRID(grid), label, 0, row, 1, 1);
+    row++;
 
     if (model_list != NULL) {
+        GtkWidget *radio;
+        GtkWidget *last = NULL;
+        GSList    *group = NULL;
+        int        i;
+
         for (i = 0; model_list[i].name != NULL; i++) {
             radio = gtk_radio_button_new_with_label(group, model_list[i].name);
-            gtk_radio_button_join_group(GTK_RADIO_BUTTON(radio), last);
-            g_object_set(radio, "margin-left", 16, NULL);
-            gtk_grid_attach(GTK_GRID(grid), radio, 0, i + 1, 1, 1);
-            last = GTK_RADIO_BUTTON(radio);
+            gtk_radio_button_join_group(GTK_RADIO_BUTTON(radio),
+                                        GTK_RADIO_BUTTON(last));
+            gtk_grid_attach(GTK_GRID(grid), radio, 0, row, 1, 1);
+            last = radio;
+            row++;
         }
 
         /* now set the proper value */
         video_model_widget_update(grid);
     }
-
-    g_object_set_data(G_OBJECT(grid), "ExtraCallback", NULL);
-
 
     gtk_widget_show_all(grid);
     return grid;
@@ -175,7 +199,6 @@ void video_model_widget_update(GtkWidget *widget)
 
     resources_get_int(resource_name, &model_id);
     index = get_model_index(model_id);
-    debug_gtk3("got resource %d, index %d.", model_id, index);
 
     while ((radio = gtk_grid_get_child_at(GTK_GRID(widget), 0, i + 1)) != NULL) {
         if (GTK_IS_RADIO_BUTTON(radio) && (index == i)) {
@@ -198,12 +221,14 @@ void video_model_widget_update(GtkWidget *widget)
 void video_model_widget_connect_signals(GtkWidget *widget)
 {
     GtkWidget *radio;
-    int i = 0;
+    int        i = 0;
 
     while ((radio = gtk_grid_get_child_at(GTK_GRID(widget), 0, i + 1)) != NULL) {
         if (GTK_IS_RADIO_BUTTON(radio)) {
-            g_signal_connect(radio, "toggled", G_CALLBACK(on_model_toggled),
-                    GINT_TO_POINTER(model_list[i].id));
+            g_signal_connect(G_OBJECT(radio),
+                             "toggled",
+                             G_CALLBACK(on_model_toggled),
+                             GINT_TO_POINTER(model_list[i].id));
         } else {
             break;
         }
@@ -221,4 +246,3 @@ void video_model_widget_set_callback(GtkWidget *widget, void (*callback)(int))
 {
     g_object_set_data(G_OBJECT(widget), "ExtraCallback", (gpointer)callback);
 }
-

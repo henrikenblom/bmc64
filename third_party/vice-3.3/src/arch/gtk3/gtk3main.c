@@ -28,18 +28,18 @@
 #include "vice.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <signal.h>
+#include <gtk/gtk.h>
 
+#include "archdep.h"
 #include "log.h"
 #include "machine.h"
 #include "main.h"
+#include "mainlock.h"
+#include "render_thread.h"
+#include "ui.h"
 #include "video.h"
-
-/* For the ugly hack below */
-#ifdef WIN32_COMPILE
-# include "windows.h"
-#endif
-
 
 /** \brief  Program driver
  *
@@ -55,22 +55,30 @@
 int main(int argc, char **argv)
 {
     /*
-     * Ugly hack to make the VTE-based monitor behave on 32-bit Windows.
-     *
-     * Without this, the monitor outputs all sorts of non-ASCII glyphs resulting
-     * in either weird tokens and a red background or a nice crash.
-     *
-     * The Windows C runtime doesn't actually use this env var, but Gtk/GLib
-     * does. Ofcourse properly fixing the monitor code would be better, but I've
-     * spent all day trying to figure this out, so it'll have to do for now.
-     *
-     * --Compyx
+     * Each thread in VICE, including main, needs to call this before anything
+     * else. Basically this is for init COM on Windows.
      */
-#ifdef WIN32_COMPILE
-    _putenv("LANG=C");
-#endif
+    archdep_thread_init();
 
-    return main_program(argc, argv);
+    /*
+     * The exit code needs to know what thread is the main thread, so that if
+     * archdep_vice_exit() is called from any other thread, it knows it needs
+     * to asynchronously call exit() on the main thread.
+     */
+    archdep_set_main_thread();
+
+    int init_result = main_program(argc, argv);
+    if (init_result) {
+        return init_result;
+    }
+
+    gtk_main();
+
+    /*
+     * Because gtk_main will  never return, we call archdep_thread_shutdown()
+     * for the main thread in the exit subsystem rather than here.
+     */
+    return 0;
 }
 
 
@@ -78,12 +86,19 @@ int main(int argc, char **argv)
  */
 void main_exit(void)
 {
-    /* Disable SIGINT.  This is done to prevent the user from keeping C-c
-       pressed and thus breaking the cleanup process, which might be
-       dangerous.  */
-    signal(SIGINT, SIG_IGN);
+    /*
+     * The render thread MUST be joined before the platform exit() is called
+     * otherwise gl calls can deadlock
+     */
+    render_thread_shutdown_and_join_all();
 
-    log_message(LOG_DEFAULT, "\nExiting...");
+    /*
+     * This needs to happen before machine_shutdown as various things get freed
+     * in that process.
+     */
+    ui_exit();
+
+    vice_thread_shutdown();
 
     machine_shutdown();
 }

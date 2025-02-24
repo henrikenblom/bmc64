@@ -51,15 +51,17 @@
  *       same with the other CPUs and finally move common code to mon_register.c
  */
 
-#define REG_LIST_65C02_SIZE (7 + 1)
-static mon_reg_list_t mon_reg_list_R65C02[REG_LIST_65C02_SIZE] = {
-    {      "PC",    e_PC, 16,                      0, 0, 0 },
-    {       "A",     e_A,  8,                      0, 0, 0 },
-    {       "X",     e_X,  8,                      0, 0, 0 },
-    {       "Y",     e_Y,  8,                      0, 0, 0 },
-    {      "SP",    e_SP,  8,                      0, 0, 0 },
-    {      "FL", e_FLAGS,  8,                      0, 0, 0 },
-    {"NV-BDIZC", e_FLAGS,  8,  MON_REGISTER_IS_FLAGS, 0, 0 },
+#define REG_LIST_65C02_SIZE (9 + 1)
+static const mon_reg_list_t mon_reg_list_R65C02[REG_LIST_65C02_SIZE] = {
+    {      "PC",         e_PC, 16,                      0, 0, 0 },
+    {       "A",          e_A,  8,                      0, 0, 0 },
+    {       "X",          e_X,  8,                      0, 0, 0 },
+    {       "Y",          e_Y,  8,                      0, 0, 0 },
+    {      "SP",         e_SP,  8,                      0, 0, 0 },
+    {      "FL",      e_FLAGS,  8,                      0, 0, 0 },
+    {"NV-BDIZC",      e_FLAGS,  8,  MON_REGISTER_IS_FLAGS, 0, 0 },
+    {     "LIN", e_Rasterline, 16,                      0, 0, 0 },
+    {     "CYC",      e_Cycle, 16,                      0, 0, 0 },
     { NULL, -1,  0,  0, 0, 0 }
 };
 
@@ -90,8 +92,24 @@ static unsigned int mon_register_get_val(int mem, int reg_id)
             return R65C02_REGS_GET_FLAGS(reg_ptr)
                    | R65C02_REGS_GET_SIGN(reg_ptr)
                    | (R65C02_REGS_GET_ZERO(reg_ptr) << 1);
+        case e_Rasterline:
+            {
+                unsigned int line, cycle;
+                int half_cycle;
+
+                mon_interfaces[e_comp_space]->get_line_cycle(&line, &cycle, &half_cycle);
+                return line;
+            }
+        case e_Cycle:
+            {
+                unsigned int line, cycle;
+                int half_cycle;
+
+                mon_interfaces[e_comp_space]->get_line_cycle(&line, &cycle, &half_cycle);
+                return cycle;
+            }
         default:
-            log_error(LOG_ERR, "Unknown register!");
+            log_error(LOG_DEFAULT, "Unknown register!");
     }
     return 0;
 }
@@ -132,10 +150,9 @@ static void mon_register_set_val(int mem, int reg_id, uint16_t val)
             R65C02_REGS_SET_STATUS(reg_ptr, (uint8_t)val);
             break;
         default:
-            log_error(LOG_ERR, "Unknown register!");
+            log_error(LOG_DEFAULT, "Unknown register!");
             return;
     }
-    force_array[mem] = 1;
 }
 
 /* TODO: should use mon_register_list_get */
@@ -148,7 +165,7 @@ static void mon_register_print(int mem)
             return;
         }
     } else if (mem != e_comp_space) {
-        log_error(LOG_ERR, "Unknown memory space!");
+        log_error(LOG_DEFAULT, "Unknown memory space!");
         return;
     }
 
@@ -184,9 +201,9 @@ static void mon_register_print(int mem)
         mon_interfaces[mem]->get_line_cycle(&line, &cycle, &half_cycle);
 
         if (half_cycle == -1) {
-            mon_out(" %03i %03i", line, cycle);
+            mon_out(" %03u %03u", line, cycle);
         } else {
-            mon_out(" %03i %03i %i", line, cycle, half_cycle);
+            mon_out(" %03u %03u %i", line, cycle, half_cycle);
         }
     }
     mon_stopwatch_show(" ", "\n");
@@ -203,7 +220,7 @@ static const char* mon_register_print_ex(int mem)
             return "";
         }
     } else if (mem != e_comp_space) {
-        log_error(LOG_ERR, "Unknown memory space!");
+        log_error(LOG_DEFAULT, "Unknown memory space!");
         return "";
     }
 

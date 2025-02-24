@@ -33,5 +33,7 @@
 #include <gtk/gtk.h>
 
 GtkWidget *superpet_widget_create(void);
+void       pet_superpet_enable_widget_sync(void);
+void       pet_superpet_widget_set_superpet_enable_callback(void (*func)(int));
 
 #endif

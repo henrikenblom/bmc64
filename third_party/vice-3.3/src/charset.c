@@ -61,37 +61,38 @@ static int test_lineend(uint8_t *s)
     return 0;
 }
 
-uint8_t *charset_petconvstring(uint8_t *c, int dir)
+uint8_t *charset_petconvstring(uint8_t *c, int mode)
 {
     uint8_t *s = c, *d = c;
     int ch;
 
-    switch (dir) {
-        case 0: /* To petscii.  */
+    switch (mode) {
+        case CONVERT_TO_PETSCII: /* To petscii.  */
             while (*s) {
                 if ((ch = test_lineend(s))) {
                     *d++ = 0x0d; /* petscii CR */
                     s += ch;
                 } else {
-                    *d++ = charset_p_topetcii(*s);
+                    *d++ = charset_p_topetscii(*s);
                     s++;
                 }
             }
             break;
 
-        case 1: /* To ascii. */
+        case CONVERT_TO_ASCII: /* To ascii. */
             while (*s) {
-                *d++ = charset_p_toascii(*s, 0);
+                *d++ = charset_p_toascii(*s, CONVERT_WITHOUT_CTRLCODES);
                 s++;
             }
             break;
 
-        case 2: /* To ascii, convert also screencodes. */
+        case CONVERT_TO_ASCII_WITH_CTRLCODES: /* To ascii, convert also screencodes. */
             while (*s) {
-                *d++ = charset_p_toascii(*s, 1);
+                *d++ = charset_p_toascii(*s, CONVERT_WITH_CTRLCODES);
                 s++;
             }
             break;
+        case CONVERT_TO_UTF8:
         default:
             log_error(LOG_DEFAULT, "Unkown conversion rule.");
     }
@@ -128,9 +129,9 @@ static uint8_t petcii_fix_dupes(uint8_t c)
 
 #define ASCII_UNMAPPED  '.'
 
-uint8_t charset_p_toascii(uint8_t c, int cs)
+uint8_t charset_p_toascii(uint8_t c, int mode)
 {
-    if (cs) {
+    if (mode) {
         /* convert ctrl chars to "screencodes" (used by monitor) */
         if (c <= 0x1f) {
             c += 0x40;
@@ -157,7 +158,7 @@ uint8_t charset_p_toascii(uint8_t c, int cs)
         return (uint8_t)((c - 0x41) + 'a');
     }
 
-    return ((isprint(c) ? c : ASCII_UNMAPPED));
+    return ((isprint((unsigned char)c) ? c : ASCII_UNMAPPED));
 }
 
 /*
@@ -170,7 +171,7 @@ uint8_t charset_p_toascii(uint8_t c, int cs)
 /* #define PETSCII_UNMAPPED 0x2e */     /* petscii "." */
 #define PETSCII_UNMAPPED 0x3f     /* petscii "?" */
 
-uint8_t charset_p_topetcii(uint8_t c)
+uint8_t charset_p_topetscii(uint8_t c)
 {
     /* map ascii to petscii */
     if (c == '\n') {
@@ -198,7 +199,7 @@ uint8_t charset_p_topetcii(uint8_t c)
     return petcii_fix_dupes(c);
 }
 
-uint8_t charset_screencode_to_petcii(uint8_t code)
+uint8_t charset_screencode_to_petscii(uint8_t code)
 {
     code &= 0x7f; /* mask inverse bit */
     if (code <= 0x1f) {
@@ -209,7 +210,7 @@ uint8_t charset_screencode_to_petcii(uint8_t code)
     return code;
 }
 
-uint8_t charset_petcii_to_screencode(uint8_t code, unsigned int reverse_mode)
+uint8_t charset_petscii_to_screencode(uint8_t code, unsigned int reverse_mode)
 {
     uint8_t rev = (reverse_mode ? 0x80 : 0x00);
 
@@ -227,7 +228,7 @@ uint8_t charset_petcii_to_screencode(uint8_t code, unsigned int reverse_mode)
     return code | rev;
 }
 
-void charset_petcii_to_screencode_line(const uint8_t *line, uint8_t **buf,
+void charset_petscii_to_screencode_line(const uint8_t *line, uint8_t **buf,
                                        unsigned int *len)
 {
     size_t linelen, i;
@@ -236,7 +237,7 @@ void charset_petcii_to_screencode_line(const uint8_t *line, uint8_t **buf,
     *buf = lib_malloc(linelen);
 
     for (i = 0; i < linelen; i++) {
-        (*buf)[i] = charset_petcii_to_screencode(line[i], 0);
+        (*buf)[i] = charset_petscii_to_screencode(line[i], 0);
     }
     *len = (unsigned int)linelen;
 }
@@ -267,11 +268,13 @@ int charset_petscii_to_ucs(uint8_t c)
             return 0x3c0;
 
         default:
-            return (int)charset_p_toascii(c, 0);
+            return (int)charset_p_toascii(c, CONVERT_WITHOUT_CTRLCODES);
     }
 }
 
-int charset_ucs_to_utf8(uint8_t *out, int code, int len)
+
+/* FIXME: `len` should be size_t */
+int charset_ucs_to_utf8(uint8_t *out, int code, size_t len)
 {
     if (code >= 0x00 && code <= 0x7f) {
         if (len >= 1) {
@@ -300,30 +303,32 @@ int charset_ucs_to_utf8(uint8_t *out, int code, int len)
         }
         return 4;
     }
-    log_error(LOG_DEFAULT, "Out-of-range code point U+%04x.", code);
+    log_error(LOG_DEFAULT, "Out-of-range code point U+%04x.", (unsigned int)code);
     return 0;
 }
 
 /* Convert a string from ASCII to PETSCII, or from PETSCII to ASCII/UTF-8 and
    return it in a malloc'd buffer. */
-uint8_t *charset_petconv_stralloc(uint8_t *in, int conv)
+uint8_t *charset_petconv_stralloc(uint8_t *in, int mode)
 {
-    uint8_t *s = in, *d;
+    uint8_t *s = in;
+    uint8_t *d;
     uint8_t *buf;
-    int len, ch;
+    int ch;
+    size_t len;
 
     len = strlen((const char *)in);
     buf = lib_malloc(len + 1);
     d = buf;
 
-    switch (conv) {
+    switch (mode) {
         case CONVERT_TO_PETSCII: /* UTF-8 not implemented. */
             while (*s) {
                 if ((ch = test_lineend(s))) {
                     *d++ = 0x0d; /* PETSCII CR */
                     s += ch;
                 } else {
-                    *d++ = charset_p_topetcii(*s);
+                    *d++ = charset_p_topetscii(*s);
                     s++;
                 }
             }
@@ -331,7 +336,7 @@ uint8_t *charset_petconv_stralloc(uint8_t *in, int conv)
 
         case CONVERT_TO_ASCII:
             while (*s) {
-                *d++ = charset_p_toascii(*s, 0);
+                *d++ = charset_p_toascii(*s, CONVERT_WITHOUT_CTRLCODES);
                 s++;
             }
             break;
@@ -340,13 +345,12 @@ uint8_t *charset_petconv_stralloc(uint8_t *in, int conv)
             while (1) {
                 while (*s) {
                     int code = charset_petscii_to_ucs(*s);
-
-                    d += charset_ucs_to_utf8(d, code, len - (int)(d - buf));
+                    d += charset_ucs_to_utf8(d, code, len - (d - buf));
                     s++;
                 }
-                if ((int)(d - buf) > len) {
+                if (d - buf > len) {
                     /* UTF-8 form is longer than the PETSCII form. */
-                    len = (int)(d - buf);
+                    len = d - buf;
                     buf = lib_realloc(buf, len + 1);
                     d = buf;
                     s = in;
@@ -355,6 +359,7 @@ uint8_t *charset_petconv_stralloc(uint8_t *in, int conv)
                 }
             }
             break;
+        case CONVERT_TO_ASCII_WITH_CTRLCODES:
         default:
             log_error(LOG_DEFAULT, "Unkown conversion rule.");
     }
@@ -380,7 +385,7 @@ char * charset_hexstring_to_byte(char *source, char *destination)
 
         if (c >= 'A' && c <= 'F') {
             value += c - 'A';
-        } else if (isdigit((int)c)) {
+        } else if (isdigit((unsigned char)c)) {
             value += c - '0';
         } else {
             break;
@@ -399,7 +404,7 @@ char * charset_hexstring_to_byte(char *source, char *destination)
 
 char *charset_replace_hexcodes(char *source)
 {
-    char * destination = lib_stralloc(source ? source : "");
+    char * destination = lib_strdup(source ? source : "");
 
     if (destination) {
         char * pread = destination;

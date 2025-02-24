@@ -68,7 +68,7 @@ static int mon_assemble_instr(const char *opcode_name, asm_mode_addr_info_t oper
     MEMSPACE mem;
     uint16_t loc;
     int const prefix[3] = { -1, 0x10, 0x11 };
-    uint8_t opc[5];
+    uint8_t opc[5] = { 0 };
     int opc_offset;
     int prefixlen;
 
@@ -121,14 +121,14 @@ static int mon_assemble_instr(const char *opcode_name, asm_mode_addr_info_t oper
             const asm_opcode_info_t *opinfo;
 
             if (prefix[j] == -1) {
-                opinfo = (monitor_cpu_for_memspace[mem]->asm_opcode_info_get)(i, 0, 0);
+                opinfo = (monitor_cpu_for_memspace[mem]->asm_opcode_info_get)(i, 0, 0, 0);
                 prefixlen = 0;
             } else {
-                opinfo = (monitor_cpu_for_memspace[mem]->asm_opcode_info_get)(prefix[j], i, 0);
+                opinfo = (monitor_cpu_for_memspace[mem]->asm_opcode_info_get)(prefix[j], i, 0, 0);
                 prefixlen = 1;
             }
 
-            if (!strcasecmp(opinfo->mnemonic, opcode_name)) {
+            if (!util_strcasecmp(opinfo->mnemonic, opcode_name)) {
                 if (opinfo->addr_mode == operand_mode) {
                     opcode = i;
                     found = TRUE;
@@ -229,12 +229,13 @@ static int mon_assemble_instr(const char *opcode_name, asm_mode_addr_info_t oper
         opc[opc_offset++] = prefix[j];
     }
     opc[opc_offset++] = opcode;
-    if (operand_mode == ASM_ADDR_MODE_INDEXED) {
+    if (operand_mode == ASM_ADDR_MODE_INDEXED ||
+        operand_mode == ASM_ADDR_MODE_H6309_INDEXED) {
         opc[opc_offset++] = (uint8_t)operand_submode;
     }
 
     len = (monitor_cpu_for_memspace[mem]->asm_addr_mode_get_size)
-              ((unsigned int)operand_mode, opc[0], opc[1], opc[2]);
+              ((unsigned int)operand_mode, opc[0], opc[1], opc[2], 0);
 
     DBG(printf("len = %d\n", len));
     if (len == opc_offset + 1) {
@@ -245,7 +246,7 @@ static int mon_assemble_instr(const char *opcode_name, asm_mode_addr_info_t oper
     }
 
     for (i = 0; i < len; i++) {
-        mon_set_mem_val(mem, (uint8_t)(loc + i), opc[i]);
+        mon_set_mem_val(mem, (uint16_t)(loc + i), opc[i]);
     }
 
     if (len >= 0) {

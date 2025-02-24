@@ -49,7 +49,7 @@
 #include "snapshot.h"
 
 #ifdef DEBUG
-static log_t c64dtvblitter_log = LOG_ERR;
+static log_t c64dtvblitter_log = LOG_DEFAULT;
 #endif
 
 static unsigned int c64dtv_blitter_int_num;
@@ -119,7 +119,7 @@ static int reg1e_mintermALU;
 void c64dtvblitter_init(void)
 {
 #ifdef DEBUG
-    if (c64dtvblitter_log == LOG_ERR) {
+    if (c64dtvblitter_log == LOG_DEFAULT) {
         c64dtvblitter_log = log_open("C64DTVBLITTER");
     }
 #endif
@@ -246,7 +246,17 @@ static inline int do_blitter_write(void)
     }
 #ifdef DEBUG
     if (blitter_log_enabled) {
-        log_message(c64dtvblitter_log, "Blitter: %s %x.%x/%x.%x to %x.%x, %d to go, minterm %d", was_write ? "transferred" : "skipped", blit_sourceA_off >> 4, blit_sourceA_off & 15, blit_sourceB_off >> 4, blit_sourceB_off & 15, blit_dest_off >> 4, blit_dest_off & 15, blitter_count - 1, reg1e_mintermALU);
+        log_message(c64dtvblitter_log,
+                "Blitter: %s %x.%x/%x.%x to %x.%x, %d to go, minterm %d",
+                was_write ? "transferred" : "skipped",
+                (unsigned int)(blit_sourceA_off >> 4),
+                (unsigned int)(blit_sourceA_off & 15),
+                (unsigned int)(blit_sourceB_off >> 4),
+                (unsigned int)(blit_sourceB_off & 15),
+                (unsigned int)(blit_dest_off >> 4),
+                (unsigned int)(blit_dest_off & 15),
+                blitter_count - 1,
+                reg1e_mintermALU);
     }
 #endif
     return was_write;
@@ -502,7 +512,8 @@ void c64dtv_blitter_store(uint16_t addr, uint8_t value)
         blitter_busy = 1;
 #ifdef DEBUG
         if (blitter_log_enabled) {
-            log_message(c64dtvblitter_log, "Scheduled Blitter (%02x)", blitter_on_irq);
+            log_message(c64dtvblitter_log, "Scheduled Blitter (%02x)",
+                    (unsigned int)blitter_on_irq);
         }
 #endif
         return;
@@ -623,7 +634,7 @@ static const char snap_module_name[] = "C64DTVBLITTER";
 #define SNAP_MAJOR 0
 #define SNAP_MINOR 0
 
-/* static log_t c64_snapshot_log = LOG_ERR; */
+/* static log_t c64_snapshot_log = LOG_DEFAULT; */
 
 int c64dtvblitter_snapshot_write_module(snapshot_t *s)
 {
@@ -679,7 +690,7 @@ int c64dtvblitter_snapshot_read_module(snapshot_t *s)
     }
 
     /* Do not accept versions higher than current */
-    if (major_version > SNAP_MAJOR || minor_version > SNAP_MINOR) {
+    if (snapshot_version_is_bigger(major_version, minor_version, SNAP_MAJOR, SNAP_MINOR)) {
         snapshot_set_error(SNAPSHOT_MODULE_HIGHER_VERSION);
         goto fail;
     }

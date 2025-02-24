@@ -28,14 +28,24 @@
  *
  */
 
+/* #define DBGSDLMENU */
+
 #include "vice.h"
+
+#include "vice_sdl.h"
+#include <stdbool.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 #include "archdep.h"
 #include "interrupt.h"
-#include "ioutil.h"
 #include "joy.h"
+#include "joystick.h"
 #include "kbd.h"
 #include "lib.h"
+#include "log.h"
 #include "machine.h"
 #include "menu_common.h"
 #include "raster.h"
@@ -44,8 +54,8 @@
 #include "sound.h"
 #include "types.h"
 #include "ui.h"
+#include "uiactions.h"
 #include "uihotkey.h"
-#include "uimenu.h"
 #include "util.h"
 #include "video.h"
 #include "videoarch.h"
@@ -53,16 +63,16 @@
 #include "vsidui_sdl.h"
 #include "vsync.h"
 
-#ifdef ANDROID_COMPILE
-#include "loader.h"
+#include "uimenu.h"
+
+#ifdef DBGSDLMENU
+#define DBG(x) log_printf x
+#else
+#define DBG(x)
 #endif
 
-#include "vice_sdl.h"
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-
 int sdl_menu_state = 0;
+int sdl_pause_state = 0;
 
 void (*sdl_ui_set_menu_params)(int index, menu_draw_t *menu_draw);
 
@@ -81,13 +91,14 @@ static uint16_t sdl_monitor_translation[256];
  * Used to properly clean up when 'Quit emu' is triggered
  */
 static uint8_t *draw_buffer_backup = NULL;
+static unsigned int draw_buffer_backup_width = 0;
+static unsigned int draw_buffer_backup_height = 0;
 
 /** \brief  Reference to menu offsets allocated in sdl_ui_menu_get_offsets()
  *
  * Used to properly clean up when 'Quit emu' is triggered
  */
 static int *menu_offsets = NULL;
-
 
 static menufont_t activefont = { NULL, sdl_active_translation, 0, 0 };
 static menufont_t menufont = { NULL, sdl_menu_translation, 0, 0 };
@@ -101,8 +112,8 @@ static menu_draw_t menu_draw = {
     0, 1,   /* color_back, color_front */
     0, 1,   /* color_default_back, color_default_front */
     6, 0,   /* color_cursor_back, color_cursor_revers */
-    13, 2,  /* color_active_green, color_inactive_red */
-    15, 11  /* color_active_grey, color_inactive_grey */
+    13, 10,  /* color_active_green, color_inactive_red */
+    15, 12, 11  /* color_active_grey, color_inactive_grey, color_disabled_grey */
 };
 
 /* charset #1 - standard ascii. this is used by the menus and file browser */
@@ -113,7 +124,7 @@ static const uint8_t sdl_char_to_screen[256] = {
 
     /* 20-7f ascii */
 
-    /* 20-2f  !"#$%&´()*+,-./ */
+    /* 20-2f  !"#$%&'()*+,-./ */
     0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28, 0x29, 0x2a, 0x2b, 0x2c, 0x2d, 0x2e, 0x2f,
     /* 30-3f 0123456789:;<=>? */
     0x30, 0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37, 0x38, 0x39, 0x3a, 0x3b, 0x3c, 0x3d, 0x3e, 0x3f,
@@ -143,34 +154,34 @@ static const uint8_t sdl_char_to_screen_uppercase[256] = {
     0x80, 0x81, 0x82, 0x83, 0x84, 0x85, 0x86, 0x87, 0x88, 0x89, 0x8a, 0x8b, 0x8c, 0x8d, 0x8e, 0x8f,
     0x90, 0x91, 0x92, 0x93, 0x94, 0x95, 0x96, 0x97, 0x98, 0x99, 0x9a, 0x9b, 0x9c, 0x9d, 0x9e, 0x9f,
 
-    /* 20-2f  !"#$%&´()*+,-./ */
-    0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28, 0x29, 0x2a, 0x2b, 0x2c, 0x2d, 0x2e, 0x2f, 
+    /* 20-2f  !"#$%&'()*+,-./ */
+    0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28, 0x29, 0x2a, 0x2b, 0x2c, 0x2d, 0x2e, 0x2f,
     /* 30-3f 0123456789:;<=>? */
-    0x30, 0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37, 0x38, 0x39, 0x3a, 0x3b, 0x3c, 0x3d, 0x3e, 0x3f, 
+    0x30, 0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37, 0x38, 0x39, 0x3a, 0x3b, 0x3c, 0x3d, 0x3e, 0x3f,
     /* 40-4f @ABCDEFGHIJKLMNO */
-    0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 
+    0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f,
     /* 50-5f PQRSTUVWXYZ[\]^_ */
-    0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f, 
+    0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f,
     /* 60-6f @ABCDEFGHIJKLMNO (shifted)*/
-    0x40, 0x41, 0x42, 0x43, 0x44, 0x45, 0x46, 0x47, 0x48, 0x49, 0x4a, 0x4b, 0x4c, 0x4d, 0x4e, 0x4f, 
+    0x40, 0x41, 0x42, 0x43, 0x44, 0x45, 0x46, 0x47, 0x48, 0x49, 0x4a, 0x4b, 0x4c, 0x4d, 0x4e, 0x4f,
     /* 70-7f PQRSTUVWXYZ[\]^_ (shifted) */
     0x50, 0x51, 0x52, 0x53, 0x54, 0x55, 0x56, 0x57, 0x58, 0x59, 0x5a, 0x5b, 0x5c, 0x5d, 0x5e, 0x5f,
 
     /* 80-9f non printable */
-    0xc0, 0xc1, 0xc2, 0xc3, 0xc4, 0xc5, 0xc6, 0xc7, 0xc8, 0xc9, 0xca, 0xcb, 0xcc, 0xcd, 0xce, 0xcf, 
-    0xd0, 0xd1, 0xd2, 0xd3, 0xd4, 0xd5, 0xd6, 0xd7, 0xd8, 0xd9, 0xda, 0xdb, 0xdc, 0xdd, 0xde, 0xdf, 
+    0xc0, 0xc1, 0xc2, 0xc3, 0xc4, 0xc5, 0xc6, 0xc7, 0xc8, 0xc9, 0xca, 0xcb, 0xcc, 0xcd, 0xce, 0xcf,
+    0xd0, 0xd1, 0xd2, 0xd3, 0xd4, 0xd5, 0xd6, 0xd7, 0xd8, 0xd9, 0xda, 0xdb, 0xdc, 0xdd, 0xde, 0xdf,
 
     /* a0-bf gfx chars */
-    0x60, 0x61, 0x62, 0x63, 0x64, 0x65, 0x66, 0x67, 0x68, 0x69, 0x6a, 0x6b, 0x6c, 0x6d, 0x6e, 0x6f, 
-    0x70, 0x71, 0x72, 0x73, 0x74, 0x75, 0x76, 0x77, 0x78, 0x79, 0x7a, 0x7b, 0x7c, 0x7d, 0x7e, 0x7f, 
+    0x60, 0x61, 0x62, 0x63, 0x64, 0x65, 0x66, 0x67, 0x68, 0x69, 0x6a, 0x6b, 0x6c, 0x6d, 0x6e, 0x6f,
+    0x70, 0x71, 0x72, 0x73, 0x74, 0x75, 0x76, 0x77, 0x78, 0x79, 0x7a, 0x7b, 0x7c, 0x7d, 0x7e, 0x7f,
 
-    /* c0-cf @ABCDEFGHIJKLMNO (shifted) alternatives */
-    0x40, 0x41, 0x42, 0x43, 0x44, 0x45, 0x46, 0x47, 0x48, 0x49, 0x4a, 0x4b, 0x4c, 0x4d, 0x4e, 0x4f, 
-    /* d0-df PQRSTUVWXYZ[\]^_ (shifted) alternatives */
-    0x50, 0x51, 0x52, 0x53, 0x54, 0x55, 0x56, 0x57, 0x58, 0x59, 0x5a, 0x5b, 0x5c, 0x5d, 0x5e, 0x5f,
+    /* c0-df -> a0..bf (was c0-df @ABCDEFGHIJKLMNO, PQRSTUVWXYZ[\]^_ (shifted) alternatives) */
+    0xa0, 0xa1, 0xa2, 0xa3, 0xa4, 0xa5, 0xa6, 0xa7, 0xa8, 0xa9, 0xaa, 0xab, 0xac, 0xad, 0xae, 0xaf,
+    0xb0, 0xb1, 0xb2, 0xb3, 0xb4, 0xb5, 0xb6, 0xb7, 0xb8, 0xb9, 0xba, 0xbb, 0xbc, 0xbd, 0xbe, 0xbf,
 
-    0x60, 0x61, 0x62, 0x63, 0x64, 0x65, 0x66, 0x67, 0x68, 0x69, 0x6a, 0x6b, 0x6c, 0x6d, 0x6e, 0x6f, 
-    0x70, 0x71, 0x72, 0x73, 0x74, 0x75, 0x76, 0x77, 0x78, 0x79, 0x7a, 0x7b, 0x7c, 0x7d, 0x7e, 0x5e
+    /* e0-ff -> e0..ff (was 60..7e,5e) */
+    0xe0, 0xe1, 0xe2, 0xe3, 0xe4, 0xe5, 0xe6, 0xe7, 0xe8, 0xe9, 0xea, 0xeb, 0xec, 0xed, 0xee, 0xef,
+    0xf0, 0xf1, 0xf2, 0xf3, 0xf4, 0xf5, 0xf6, 0xf7, 0xf8, 0xf9, 0xfa, 0xfb, 0xfc, 0xfd, 0xfe, 0xff
 };
 
 /* charset #3 - lowercase petscii. this is used by the monitor and virtual keyboard */
@@ -179,34 +190,36 @@ static const uint8_t sdl_char_to_screen_monitor[256] = {
     0x80, 0x81, 0x82, 0x83, 0x84, 0x85, 0x86, 0x87, 0x88, 0x89, 0x8a, 0x8b, 0x8c, 0x8d, 0x8e, 0x8f,
     0x90, 0x91, 0x92, 0x93, 0x94, 0x95, 0x96, 0x97, 0x98, 0x99, 0x9a, 0x9b, 0x9c, 0x9d, 0x9e, 0x9f,
 
-    /* 20-2f  !"#$%&´()*+,-./ */
-    0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28, 0x29, 0x2a, 0x2b, 0x2c, 0x2d, 0x2e, 0x2f, 
+    /* 20-2f  !"#$%&'()*+,-./ */
     /* 30-3f 0123456789:;<=>? */
-    0x30, 0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37, 0x38, 0x39, 0x3a, 0x3b, 0x3c, 0x3d, 0x3e, 0x3f, 
+    0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28, 0x29, 0x2a, 0x2b, 0x2c, 0x2d, 0x2e, 0x2f,
+    0x30, 0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37, 0x38, 0x39, 0x3a, 0x3b, 0x3c, 0x3d, 0x3e, 0x3f,
+
     /* 40-4f @ABCDEFGHIJKLMNO */
-    0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 
     /* 50-5f PQRSTUVWXYZ[\]^_ */
-    0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f, 
+    0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f,
+    0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f,
+
     /* 60-6f @ABCDEFGHIJKLMNO (shifted)*/
-    0x40, 0x41, 0x42, 0x43, 0x44, 0x45, 0x46, 0x47, 0x48, 0x49, 0x4a, 0x4b, 0x4c, 0x4d, 0x4e, 0x4f, 
+    0x40, 0x41, 0x42, 0x43, 0x44, 0x45, 0x46, 0x47, 0x48, 0x49, 0x4a, 0x4b, 0x4c, 0x4d, 0x4e, 0x4f,
     /* 70-7f PQRSTUVWXYZ[\]^_ (shifted) */
     0x50, 0x51, 0x52, 0x53, 0x54, 0x55, 0x56, 0x57, 0x58, 0x59, 0x5a, 0x5b, 0x5c, 0x5d, 0x5e, 0x5f,
 
     /* 80-9f non printable */
-    0xc0, 0xc1, 0xc2, 0xc3, 0xc4, 0xc5, 0xc6, 0xc7, 0xc8, 0xc9, 0xca, 0xcb, 0xcc, 0xcd, 0xce, 0xcf, 
-    0xd0, 0xd1, 0xd2, 0xd3, 0xd4, 0xd5, 0xd6, 0xd7, 0xd8, 0xd9, 0xda, 0xdb, 0xdc, 0xdd, 0xde, 0xdf, 
+    0xc0, 0xc1, 0xc2, 0xc3, 0xc4, 0xc5, 0xc6, 0xc7, 0xc8, 0xc9, 0xca, 0xcb, 0xcc, 0xcd, 0xce, 0xcf,
+    0xd0, 0xd1, 0xd2, 0xd3, 0xd4, 0xd5, 0xd6, 0xd7, 0xd8, 0xd9, 0xda, 0xdb, 0xdc, 0xdd, 0xde, 0xdf,
 
     /* a0-bf gfx chars */
-    0x60, 0x61, 0x62, 0x63, 0x64, 0x65, 0x66, 0x67, 0x68, 0x69, 0x6a, 0x6b, 0x6c, 0x6d, 0x6e, 0x6f, 
-    0x70, 0x71, 0x72, 0x73, 0x74, 0x75, 0x76, 0x77, 0x78, 0x79, 0x7a, 0x7b, 0x7c, 0x7d, 0x7e, 0x7f, 
+    0x60, 0x61, 0x62, 0x63, 0x64, 0x65, 0x66, 0x67, 0x68, 0x69, 0x6a, 0x6b, 0x6c, 0x6d, 0x6e, 0x6f,
+    0x70, 0x71, 0x72, 0x73, 0x74, 0x75, 0x76, 0x77, 0x78, 0x79, 0x7a, 0x7b, 0x7c, 0x7d, 0x7e, 0x7f,
 
-    /* c0-cf @ABCDEFGHIJKLMNO (shifted) alternatives */
-    0x40, 0x41, 0x42, 0x43, 0x44, 0x45, 0x46, 0x47, 0x48, 0x49, 0x4a, 0x4b, 0x4c, 0x4d, 0x4e, 0x4f, 
-    /* d0-df PQRSTUVWXYZ[\]^_ (shifted) alternatives */
-    0x50, 0x51, 0x52, 0x53, 0x54, 0x55, 0x56, 0x57, 0x58, 0x59, 0x5a, 0x5b, 0x5c, 0x5d, 0x5e, 0x5f,
+    /* c0-df -> a0..bf (was c0-df @ABCDEFGHIJKLMNO, PQRSTUVWXYZ[\]^_ (shifted) alternatives) */
+    0xa0, 0xa1, 0xa2, 0xa3, 0xa4, 0xa5, 0xa6, 0xa7, 0xa8, 0xa9, 0xaa, 0xab, 0xac, 0xad, 0xae, 0xaf,
+    0xb0, 0xb1, 0xb2, 0xb3, 0xb4, 0xb5, 0xb6, 0xb7, 0xb8, 0xb9, 0xba, 0xbb, 0xbc, 0xbd, 0xbe, 0xbf,
 
-    0x60, 0x61, 0x62, 0x63, 0x64, 0x65, 0x66, 0x67, 0x68, 0x69, 0x6a, 0x6b, 0x6c, 0x6d, 0x6e, 0x6f, 
-    0x70, 0x71, 0x72, 0x73, 0x74, 0x75, 0x76, 0x77, 0x78, 0x79, 0x7a, 0x7b, 0x7c, 0x7d, 0x7e, 0x7f
+    /* e0-ff -> e0..ff (was 60..7e,5e) */
+    0xe0, 0xe1, 0xe2, 0xe3, 0xe4, 0xe5, 0xe6, 0xe7, 0xe8, 0xe9, 0xea, 0xeb, 0xec, 0xed, 0xee, 0xef,
+    0xf0, 0xf1, 0xf2, 0xf3, 0xf4, 0xf5, 0xf6, 0xf7, 0xf8, 0xf9, 0xfa, 0xfb, 0xfc, 0xfd, 0xfe, 0xff
 };
 
 /* ------------------------------------------------------------------ */
@@ -214,7 +227,7 @@ static const uint8_t sdl_char_to_screen_monitor[256] = {
 
 static ui_menu_retval_t sdl_ui_menu_item_activate(ui_menu_entry_t *item);
 
-static void sdl_ui_putchar(uint8_t c, int pos_x, int pos_y)
+void sdl_ui_putchar(uint8_t c, int pos_x, int pos_y)
 {
     int x, y;
     uint8_t fontchar;
@@ -296,7 +309,7 @@ static int *sdl_ui_menu_get_offsets(ui_menu_entry_t *menu, int num_items)
                 j = i;
 
                 while ((j < num_items) && (menu[j].type == block_type)) {
-                    len = strlen(menu[j].string);
+                    len = (int)strlen(menu[j].string);
                     menu_offsets[j] = len;
                     if (len > max_len) {
                         max_len = len;
@@ -355,6 +368,14 @@ int sdl_ui_set_toggle_colors(int state)
     return color;
 }
 
+static int sdl_ui_set_item_colors(int status)
+{
+    uint8_t color = menu_draw.color_front;
+    menu_draw.color_front = (status == MENU_STATUS_INACTIVE) ? menu_draw.color_inactive_grey :
+                            (status == MENU_STATUS_NA) ? menu_draw.color_disabled_grey : menu_draw.color_default_front;
+    return color;
+}
+
 int sdl_ui_set_default_colors(void)
 {
     uint8_t color = menu_draw.color_front;
@@ -362,9 +383,117 @@ int sdl_ui_set_default_colors(void)
     return color;
 }
 
+/** \brief  Determine the `itemdata` value for a menu item
+ *
+ * Menu items with an action ID, and thus an action handler, do not have a
+ * callback for the SDL menu code to use to provide a string to display after
+ * the item. Providing that string is done here, replacing what the callback
+ * would have done in its `activated==0` code path.
+ *
+ * \param[in]   item    menu item
+ *
+ * \return  string to display
+ */
+static const char *get_itemdata_for_action(ui_menu_entry_t *item)
+{
+    const char  *itemdata = NULL;
+    const char  *sval = NULL;
+    int          ival = 0;
+    static char  itembuf[64];
+
+#if 0
+    printf("%s(): UI action path for item '%s' (action = %d, '%s')\n",
+           __func__, item->string, item->action, ui_action_get_name(item->action));
+#endif
+    if (item->action <= ACTION_NONE) {
+        log_warning(LOG_DEFAULT, "No valid action ID for item without UI callback");
+        return NULL;
+    }
+
+    if (item->displayed != NULL) {
+        return item->displayed(item);
+    }
+
+    switch (item->type) {
+        case MENU_ENTRY_OTHER:
+            /* normal activatable item, nothing to display */
+            break;
+
+        case MENU_ENTRY_RESOURCE_TOGGLE:
+            /* assume only integer resources are used for toggleable items */
+            if (resources_get_int(item->resource, &ival) == 0) {
+                itemdata = ival ? sdl_menu_text_tick : NULL;
+            } else {
+                itemdata = sdl_menu_text_unknown;
+            }
+            break;
+
+        case MENU_ENTRY_OTHER_TOGGLE:
+            /* Use the function in the data field to get the proper string
+             * to display. For now this appears to be sufficient, but there
+             * might be cases where we need both the function and the data
+             * field. */
+            if (item->displayed == NULL) {
+                log_warning(LOG_DEFAULT,
+                            "%s(): UI action %d (%s) is `MENU_ENTRY_OTHER_TOGGLE`"
+                            " but the display() function has not been specified,"
+                            " defaulting to `NULL`",
+                            __func__, item->action, ui_action_get_name(item->action));
+                itemdata = NULL;
+            }
+            break;
+
+        case MENU_ENTRY_RESOURCE_RADIO:
+            /* The following assumes there are only integer and string resources */
+            if (resources_query_type(item->resource) == RES_INTEGER) {
+                if (resources_get_int(item->resource, &ival) == 0) {
+                    if (vice_ptr_to_int(item->data) == ival) {
+                        itemdata = sdl_menu_text_tick;
+                    }
+                }
+            } else {
+                if (resources_get_string(item->resource, &sval) == 0) {
+                    if (sval != NULL && item->data != NULL &&
+                        strcmp((const char*)(item->data), sval) == 0) {
+                        itemdata = sdl_menu_text_tick;
+                    }
+                }
+            }
+            break;
+
+        case MENU_ENTRY_RESOURCE_INT:
+            if (resources_get_int(item->resource, &ival) == 0) {
+                snprintf(itembuf, sizeof itembuf, "%d", ival);
+                itembuf[sizeof itembuf - 1] = '\0';
+                itemdata = itembuf;
+            } else {
+                itemdata = sdl_menu_text_unknown;
+            }
+            break;
+
+        case MENU_ENTRY_RESOURCE_STRING:
+            if (resources_get_string(item->resource, &sval) == 0) {
+                 itemdata = sval;
+            } else {
+                itemdata = sdl_menu_text_unknown;
+            }
+            break;
+
+        default:
+            log_error(LOG_DEFAULT,
+                      "%s(): unhandled type %u for item %s without callback.",
+                    __func__, item->type, item->string);
+            itemdata = sdl_menu_text_unknown;
+            break;
+    }
+    return itemdata;
+}
+
 static int sdl_ui_display_item(ui_menu_entry_t *item, int y_pos, int value_offset, int iscursor)
 {
-    int n, i = 0, istoggle = 0, status = 0;
+    int n, i = 0;
+    bool istoggle = false;
+    int status = MENU_STATUS_ACTIVE;
     char string[3] = {0x20, 0x20, 0};
     const char *itemdata;
     uint8_t oldbg = 0, oldfg = 1;
@@ -390,38 +519,53 @@ static int sdl_ui_display_item(ui_menu_entry_t *item, int y_pos, int value_offse
     if (iscursor) {
         oldbg = sdl_ui_set_cursor_colors();
     }
+
+    /* Do we want to print a tick-mark? */
     istoggle = (item->type == MENU_ENTRY_RESOURCE_TOGGLE) ||
                 (item->type == MENU_ENTRY_RESOURCE_RADIO) ||
                 (item->type == MENU_ENTRY_OTHER_TOGGLE);
 
-    itemdata = item->callback(0, item->data);
+    /* Do we have a callback? */
+    if (item->callback != NULL) {
+        /* call callback to retrieve display string, if any */
+        itemdata = item->callback(0, item->data);
+    } else {
+        /* No: must have UI action handler then */
+        itemdata = get_itemdata_for_action(item);
+    }
 
     if ((itemdata != NULL) && !strcmp(itemdata, MENU_NOT_AVAILABLE_STRING)) {
         /* menu is not available */
-        status = 2;
+        status = MENU_STATUS_NA;
     } else {
         /* print tick-mark for toggles and radio buttons at the start of the line */
         if (istoggle) {
-            status = (itemdata == NULL) ? 0 : 1;
+            status = (itemdata == NULL) ? MENU_STATUS_ACTIVE : MENU_STATUS_INACTIVE;
             string[0] = (itemdata == NULL) ? MENU_CHECKMARK_UNCHECKED_CHAR : itemdata[0];
         }
     }
 
+    /* set color for the tickmark */
     if (!iscursor) {
         oldfg = sdl_ui_set_tickmark_colors(status);
     }
 
+    /* print the first 3 characters in the line (tick-mark, padding) */
     if ((n = sdl_ui_print(string, MENU_FIRST_X+i, y_pos + MENU_FIRST_Y)) < 0) {
         goto dispitemexit;
     }
     i += n;
 
+    /* setup color for the menu item */
     if (!iscursor) {
         sdl_ui_reset_tickmark_colors(oldfg);
-    }
-
-    if (!iscursor && istoggle) {
-        sdl_ui_set_toggle_colors(status);
+        if (istoggle) {
+            sdl_ui_set_toggle_colors(status);
+        } else if ((status == MENU_STATUS_NA) || (item->status == MENU_STATUS_NA)) {
+            sdl_ui_set_item_colors(MENU_STATUS_NA);
+        } else {
+            sdl_ui_set_item_colors(item->status);
+        }
     }
 
     /* print the actual menu item */
@@ -450,7 +594,7 @@ static int sdl_ui_display_item(ui_menu_entry_t *item, int y_pos, int value_offse
     }
 
     /* if the item was not an available "toggle", then print the item data */
-    if (!istoggle || (status == 2)) {
+    if (!istoggle || (status == MENU_STATUS_NA)) {
         if ((n = sdl_ui_print(itemdata, MENU_FIRST_X + i, y_pos + MENU_FIRST_Y)) < 0) {
             goto dispitemexit;
         }
@@ -471,7 +615,7 @@ static void sdl_ui_menu_redraw(ui_menu_entry_t *menu, const char *title, int off
 {
     int i = 0;
 
-    sdl_ui_init_draw_params();
+    sdl_ui_init_draw_params(sdl_active_canvas);
     sdl_ui_clear();
     sdl_ui_display_title(title);
 
@@ -496,8 +640,54 @@ static void sdl_ui_menu_redraw_cursor(ui_menu_entry_t *menu, int offset, int *va
     }
 }
 
+/** \brief  Draw scroll bar to indicate there are more menu items than shown
+ *
+ * Currently only draws the up/down indicators when the menu is larger than
+ * can be displayed. Full scroll bar is probably overkill.
+ *
+ * \param[in]   menu_offset     offset in the menu of the first displayed item
+ * \param[in]   menu_item_count number of menu items in the current menu
+ * \param[in]   cursor_row      cursor row in displayed menu
+ */
+static void sdl_ui_menu_draw_scrollbar(int menu_offset,
+                                       int menu_item_count,
+                                       int cursor_row)
+{
+    bool    on_cursor = false;
+    uint8_t old_color = 0;
+
+    /* render scroll bar up arrow, if applicable */
+    if (menu_offset > 0) {
+        on_cursor = (bool)(cursor_row == 0);
+        if (on_cursor) {
+            old_color = sdl_ui_set_cursor_colors();
+        }
+        sdl_ui_putchar(UIFONT_SCROLLBAR_UP_CHAR,
+                       menu_draw.max_text_x - 1,
+                       MENU_FIRST_Y);
+        if (on_cursor) {
+            sdl_ui_reset_cursor_colors(old_color);
+        }
+    }
+
+    /* render scroll bar down arrow, if applicable */
+    if (menu_item_count - menu_offset > menu_draw.max_text_y - MENU_FIRST_Y) {
+        on_cursor = (bool)(cursor_row == menu_draw.max_text_y - MENU_FIRST_Y - 1);
+        if (on_cursor) {
+            old_color = sdl_ui_set_cursor_colors();
+        }
+        sdl_ui_putchar(UIFONT_SCROLLBAR_DOWN_CHAR,
+                       menu_draw.max_text_x - 1,
+                       menu_draw.max_text_y - 1);
+        if (on_cursor) {
+            sdl_ui_reset_cursor_colors(old_color);
+        }
+    }
+}
+
 static ui_menu_retval_t sdl_ui_menu_display(ui_menu_entry_t *menu, const char *title, int allow_mapping)
 {
+    static int last_cur = -1, last_cur_offset = -1;
     int num_items = 0, cur = 0, cur_old = -1, cur_offset = 0, in_menu = 1, redraw = 1;
     int *value_offsets = NULL;
     ui_menu_retval_t menu_retval = MENU_RETVAL_DEFAULT;
@@ -522,6 +712,13 @@ static ui_menu_retval_t sdl_ui_menu_display(ui_menu_entry_t *menu, const char *t
     if (menu[0].type == MENU_ENTRY_TEXT) {
         cur = 1;
     }
+    /* restore last position in main menu */
+    if (menu == main_menu) {
+        if ((last_cur >= 0) && (last_cur_offset >= 0)) {
+            cur = last_cur;
+            cur_offset = last_cur_offset;
+        }
+    }
 
     while (in_menu) {
         if (redraw) {
@@ -531,6 +728,8 @@ static ui_menu_retval_t sdl_ui_menu_display(ui_menu_entry_t *menu, const char *t
         } else {
             sdl_ui_menu_redraw_cursor(menu, cur_offset, value_offsets, cur, cur_old);
         }
+        sdl_ui_menu_draw_scrollbar(cur_offset, num_items, cur);
+
         sdl_ui_refresh();
 
         switch (sdl_ui_menu_poll_input()) {
@@ -644,8 +843,17 @@ static ui_menu_retval_t sdl_ui_menu_display(ui_menu_entry_t *menu, const char *t
                 in_menu = 0;
                 break;
             case MENU_ACTION_MAP:
-                if (allow_mapping && sdl_ui_hotkey_map(&(menu[cur + cur_offset]))) {
-                    sdl_ui_menu_redraw(menu, title, cur_offset, value_offsets, cur);
+                if (allow_mapping) {
+                    ui_menu_entry_t *item = &(menu[cur + cur_offset]);
+
+                    if (ui_action_is_valid(item->action)) {
+                        if (sdl_ui_hotkey_map(item)) {
+                            sdl_ui_menu_redraw(menu, title, cur_offset, value_offsets, cur);
+                        }
+                    } else {
+                        ui_error("Cannot assign hotkey to item: no valid UI action ID.");
+                        sdl_ui_menu_redraw(menu, title, cur_offset, value_offsets, cur);
+                    }
                 }
                 break;
             default:
@@ -656,6 +864,11 @@ static ui_menu_retval_t sdl_ui_menu_display(ui_menu_entry_t *menu, const char *t
 
     lib_free(value_offsets);
     menu_offsets = NULL;
+    /* remember position in main menu for next time we enter it */
+    if (menu == main_menu) {
+        last_cur = cur;
+        last_cur_offset = cur_offset;
+    }
     return menu_retval;
 }
 
@@ -663,19 +876,38 @@ static ui_menu_retval_t sdl_ui_menu_item_activate(ui_menu_entry_t *item)
 {
     const char *p = NULL;
 
+    /* inactive or not available items can never be activated */
+    if ((item->status == MENU_STATUS_INACTIVE) || (item->status == MENU_STATUS_NA)) {
+        return MENU_RETVAL_DEFAULT;
+    }
+
     switch (item->type) {
-        case MENU_ENTRY_OTHER:
-        case MENU_ENTRY_OTHER_TOGGLE:
-        case MENU_ENTRY_DIALOG:
-        case MENU_ENTRY_RESOURCE_TOGGLE:
-        case MENU_ENTRY_RESOURCE_RADIO:
-        case MENU_ENTRY_RESOURCE_INT:
+        case MENU_ENTRY_OTHER:              /* fall through */
+        case MENU_ENTRY_OTHER_TOGGLE:       /* fall through */
+        case MENU_ENTRY_DIALOG:             /* fall through */
+        case MENU_ENTRY_RESOURCE_TOGGLE:    /* fall through */
+        case MENU_ENTRY_RESOURCE_RADIO:     /* fall through */
+        case MENU_ENTRY_RESOURCE_INT:       /* fall through */
         case MENU_ENTRY_RESOURCE_STRING:
-            p = item->callback(1, item->data);
-            if (p == sdl_menu_text_exit_ui) {
+            /* First check for callback. This function call be called from
+             * an action handler to activate a dialog, so we don't want to
+             * trigger the UI action handler again. */
+            if (item->callback != NULL) {
+                p = item->callback(1, item->data);
+            } else if (item->action > ACTION_NONE) {
+                /* UI action: trigger */
+#if 0
+                DBG(("%s(): got action ID %d (%s)",
+                     __func__, item->action, ui_action_get_name(item->action)));
+#endif
+                ui_action_trigger(item->action);
+                p = item->activated;
+            }
+            if (p != NULL && strcmp(sdl_menu_text_exit_ui, p) == 0) {
                 return MENU_RETVAL_EXIT_UI;
             }
             break;
+
         case MENU_ENTRY_SUBMENU:
             return sdl_ui_menu_display((ui_menu_entry_t *)item->data, item->string, 1);
             break;
@@ -688,45 +920,89 @@ static ui_menu_retval_t sdl_ui_menu_item_activate(ui_menu_entry_t *item)
     return MENU_RETVAL_DEFAULT;
 }
 
+/* make a backup of the current emulator screen contents */
+void sdl_ui_create_draw_buffer_backup(void)
+{
+    unsigned int width = sdl_active_canvas->draw_buffer->draw_buffer_width;
+    unsigned int height = sdl_active_canvas->draw_buffer->draw_buffer_height;
+
+    draw_buffer_backup = lib_malloc(width * height);
+    memcpy(draw_buffer_backup, sdl_active_canvas->draw_buffer->draw_buffer, width * height);
+    draw_buffer_backup_width = width;
+    draw_buffer_backup_height = height;
+}
+
+/* copy the backup of the emulator output back to the canvas */
+void sdl_ui_restore_draw_buffer_backup(void)
+{
+    unsigned int width = sdl_active_canvas->draw_buffer->draw_buffer_width;
+    unsigned int height = sdl_active_canvas->draw_buffer->draw_buffer_height;
+
+    if (draw_buffer_backup && draw_buffer_backup_width == width && draw_buffer_backup_height == height) {
+        memcpy(sdl_active_canvas->draw_buffer->draw_buffer, draw_buffer_backup, width * height);
+    }
+}
+
+/* free the backup buffer */
+void sdl_ui_destroy_draw_buffer_backup(void)
+{
+    if (draw_buffer_backup) {
+        lib_free(draw_buffer_backup);
+        draw_buffer_backup = NULL;
+    }
+}
+
 static void sdl_ui_trap(uint16_t addr, void *data)
 {
     unsigned int width;
     unsigned int height;
     static char msg[0x40];
 
+    DBG(("sdl_ui_trap start"));
+
     width = sdl_active_canvas->draw_buffer->draw_buffer_width;
     height = sdl_active_canvas->draw_buffer->draw_buffer_height;
-    draw_buffer_backup = lib_malloc(width * height);
 
-    memcpy(draw_buffer_backup, sdl_active_canvas->draw_buffer->draw_buffer, width * height);
+    sdl_ui_create_draw_buffer_backup();
 
     sdl_ui_activate_pre_action();
+
     if (machine_class != VICE_MACHINE_VSID) {
         memset(sdl_active_canvas->draw_buffer->draw_buffer, 0, width * height);
     }
 
     if (data == NULL) {
+        /* called via "menu key" to open the menu */
         sprintf(&msg[0], "VICE %s - main menu", machine_name);
         sdl_ui_menu_display(main_menu, msg, 1);
     } else {
-        sdl_ui_init_draw_params();
+        /* called via hotkey */
+        sdl_ui_init_draw_params(sdl_active_canvas);
         sdl_ui_menu_item_activate((ui_menu_entry_t *)data);
     }
 
     if (machine_class == VICE_MACHINE_VSID) {
         memset(sdl_active_canvas->draw_buffer_vsid->draw_buffer, 0, width * height);
         sdl_ui_refresh();
-    } else {
-        if (ui_emulation_is_paused() && (width == sdl_active_canvas->draw_buffer->draw_buffer_width) && (height == sdl_active_canvas->draw_buffer->draw_buffer_height)) {
+    }
+#if 0
+/* this should be no more needed */
+    else {
+        if (ui_pause_active() && draw_buffer_backup &&
+            (width == sdl_active_canvas->draw_buffer->draw_buffer_width) &&
+            (height == sdl_active_canvas->draw_buffer->draw_buffer_height)) {
             memcpy(sdl_active_canvas->draw_buffer->draw_buffer, draw_buffer_backup, width * height);
             sdl_ui_refresh();
         }
     }
-
+#endif
     sdl_ui_activate_post_action();
 
-    lib_free(draw_buffer_backup);
-    draw_buffer_backup = NULL;
+    sdl_ui_destroy_draw_buffer_backup();
+
+    sdljoy_clear_presses();
+
+    DBG(("sdl_ui_trap end"));
 }
 
 /* ------------------------------------------------------------------ */
@@ -875,84 +1151,25 @@ static int sdl_ui_readline_input(SDLKey *key, SDLMod *mod, Uint16 *c_uni)
     SDL_Event e;
     int got_key = 0;
     ui_menu_action_t action = MENU_ACTION_NONE;
-#ifdef USE_SDLUI2
+#ifdef USE_SDL2UI
     int i;
 #endif
 
     *mod = KMOD_NONE;
     *c_uni = 0;
 
-#ifdef USE_SDLUI2
+#ifdef USE_SDL2UI
     SDL_StartTextInput();
 #endif
 
     do {
-#ifdef ANDROID_COMPILE
-        struct locnet_al_event event1;
-        struct locnet_al_event *event = &event1;
-        ui_menu_action_t action2;
-#endif
-        action = MENU_ACTION_NONE;
-
-#ifdef ANDROID_COMPILE
-        while (!Android_PollEvent(&event1)) {
-            SDL_Delay(20);
-        }
-        switch (event->eventType) {
-            case SDL_JOYAXISMOTION:
-                {
-                    action = sdljoy_axis_event(0, 0, event->x / 256.0f * 32767);
-                    action2 = sdljoy_axis_event(0, 1, event->y / 256.0f * 32767);
-                    if (action == MENU_ACTION_NONE) {
-                        action = action2;
-                    }
-                }
-                break;
-            case SDL_JOYBUTTONDOWN:
-                {
-                    action = sdljoy_button_event(0, event->keycode, 1);
-                }
-                break;
-            case SDL_JOYBUTTONUP:
-                {
-                    action = sdljoy_button_event(0, event->keycode, 0);
-                }
-                break;
-            case SDL_KEYDOWN:
-                {
-                    unsigned long modifier = event->modifier;
-                    int ctrl = ((modifier & KEYBOARD_CTRL_FLAG) != 0);
-                    int alt = ((modifier & KEYBOARD_ALT_FLAG) != 0);
-                    int shift = ((modifier & KEYBOARD_SHIFT_FLAG) != 0);
-                    unsigned long kcode = (unsigned long)event->keycode;
-
-                    int kmod = 0;
-
-                    if (ctrl) {
-                        kmod |= KMOD_LCTRL;
-                    }
-                    if (alt) {
-                        kmod |= KMOD_LALT;
-                    }
-                    if (shift) {
-                        kmod |= KMOD_LSHIFT;
-                    }
-
-                    *key = kcode;
-                    *mod = kmod;
-                    *c_uni = event->unicode;
-                    got_key = 1;
-                }
-                break;
-        }
-#else
         SDL_WaitEvent(&e);
 
         switch (e.type) {
             case SDL_KEYDOWN:
                 *key = SDL2x_to_SDL1x_Keys(e.key.keysym.sym);
                 *mod = e.key.keysym.mod;
-#ifdef USE_SDLUI2
+#ifdef USE_SDL2UI
                 /* For SDL2x only get 'special' keys from keydown event. */
                 for (i = 0; keytable_pc_special[i] != -1; ++i) {
                     SDLKey special = SDL2x_to_SDL1x_Keys(e.key.keysym.sym);
@@ -967,7 +1184,7 @@ static int sdl_ui_readline_input(SDLKey *key, SDLMod *mod, Uint16 *c_uni)
 #endif
                 break;
 
-#ifdef USE_SDLUI2
+#ifdef USE_SDL2UI
             case SDL_TEXTINPUT:
                 if (e.text.text[0] != 0) {
                     *key = e.text.text[0];
@@ -981,20 +1198,19 @@ static int sdl_ui_readline_input(SDLKey *key, SDLMod *mod, Uint16 *c_uni)
 
 #ifdef HAVE_SDL_NUMJOYSTICKS
             case SDL_JOYAXISMOTION:
-                action = sdljoy_axis_event(e.jaxis.which, e.jaxis.axis, e.jaxis.value);
+                sdljoy_axis_event(e.jaxis.which, e.jaxis.axis, e.jaxis.value);
                 break;
             case SDL_JOYBUTTONDOWN:
-                action = sdljoy_button_event(e.jbutton.which, e.jbutton.button, 1);
+                joy_button_event(e.jbutton.which, e.jbutton.button, 1);
                 break;
             case SDL_JOYHATMOTION:
-                action = sdljoy_hat_event(e.jhat.which, e.jhat.hat, e.jhat.value);
+                joy_hat_event(e.jhat.which, e.jhat.hat, e.jhat.value);
                 break;
 #endif
             default:
                 ui_handle_misc_sdl_event(e);
                 break;
         }
-#endif
 
         switch (action) {
             case MENU_ACTION_LEFT:
@@ -1022,7 +1238,7 @@ static int sdl_ui_readline_input(SDLKey *key, SDLMod *mod, Uint16 *c_uni)
 
     } while (!got_key);
 
-#ifdef USE_SDLUI2
+#ifdef USE_SDL2UI
     SDL_StopTextInput();
 #endif
 
@@ -1147,7 +1363,7 @@ static int sdl_ui_slider(const char* title, const int cur, const int min, const 
 
                 /* accept value from user, convert and free */
                 if (value) {
-                    i = strtol(value, NULL, 0);
+                    i = (int)strtol(value, NULL, 0);
 
                     if (i < min) {
                         i = min;
@@ -1202,8 +1418,10 @@ menufont_t *sdl_ui_get_menu_font(void)
     return &activefont;
 }
 
+/* called before the UI runs by sdl_ui_trap, sdl_vkbd_key_map, uimon_window_open */
 void sdl_ui_activate_pre_action(void)
 {
+    DBG(("sdl_ui_activate_pre_action start"));
 #ifdef HAVE_FFMPEG
     if (screenshot_is_recording()) {
         screenshot_stop_recording();
@@ -1221,26 +1439,28 @@ void sdl_ui_activate_pre_action(void)
         sdl_vsid_close();
     }
 
-#ifndef USE_SDLUI2
+#ifndef USE_SDL2UI
     SDL_EnableKeyRepeat(SDL_DEFAULT_REPEAT_DELAY, SDL_DEFAULT_REPEAT_INTERVAL);
 #endif
     sdl_menu_state = 1;
     ui_check_mouse_cursor();
+    sdljoy_autorepeat_init();
+    DBG(("sdl_ui_activate_pre_action end"));
 }
 
+/* called when UI closes and emulator resumes by sdl_ui_trap, sdl_vkbd_key_map, uimon_window_close */
 void sdl_ui_activate_post_action(void)
 {
-    int warp_state;
+    DBG(("sdl_ui_activate_post_action start"));
 
     sdl_menu_state = 0;
     ui_check_mouse_cursor();
-#ifndef USE_SDLUI2
+#ifndef USE_SDL2UI
     SDL_EnableKeyRepeat(0, 0);
 #endif
 
     /* Do not resume sound if in warp mode */
-    resources_get_int("WarpMode", &warp_state);
-    if (warp_state == 0) {
+    if (!vsync_get_warp_mode()) {
         sound_resume();
     }
 
@@ -1248,23 +1468,34 @@ void sdl_ui_activate_post_action(void)
         sdl_vsid_activate();
     }
 
+    sdl_ui_restore_draw_buffer_backup();
+
     /* Force a video refresh */
+    video_canvas_refresh_all(sdl_active_canvas);
     /* SDL mode: prevent core dump - pressing menu key in -console mode causes parent_raster to be NULL */
     if (sdl_active_canvas->parent_raster) {
         raster_force_repaint(sdl_active_canvas->parent_raster);
     }
-}
 
-void sdl_ui_init_draw_params(void)
-{
-    if (sdl_ui_set_menu_params != NULL) {
-        sdl_ui_set_menu_params(sdl_active_canvas->index, &menu_draw);
+    /* if the emulator was paused before, enter pause state */
+    if (sdl_pause_state) {
+        sdl_pause_state = 0;
+        ui_pause_enable();
     }
 
-    menu_draw.pitch = sdl_active_canvas->draw_buffer->draw_buffer_pitch;
-    menu_draw.offset = sdl_active_canvas->geometry->gfx_position.x + menu_draw.extra_x
-                       + (sdl_active_canvas->geometry->gfx_position.y + menu_draw.extra_y) * menu_draw.pitch
-                       + sdl_active_canvas->geometry->extra_offscreen_border_left;
+    DBG(("sdl_ui_activate_post_action end"));
+}
+
+void sdl_ui_init_draw_params(video_canvas_t *canvas)
+{
+    if (sdl_ui_set_menu_params != NULL) {
+        sdl_ui_set_menu_params(canvas->index, &menu_draw);
+    }
+
+    menu_draw.pitch = canvas->draw_buffer->draw_buffer_pitch;
+    menu_draw.offset = canvas->geometry->gfx_position.x + menu_draw.extra_x
+                       + (canvas->geometry->gfx_position.y + menu_draw.extra_y) * menu_draw.pitch
+                       + canvas->geometry->extra_offscreen_border_left;
 }
 
 void sdl_ui_reverse_colors(void)
@@ -1282,7 +1513,7 @@ ui_menu_action_t sdl_ui_menu_poll_input(void)
 
     do {
         SDL_Delay(20);
-        retval = ui_dispatch_events();
+        retval = ui_dispatch_events_for_menu_action();
 #ifdef HAVE_SDL_NUMJOYSTICKS
         if (retval == MENU_ACTION_NONE || retval == MENU_ACTION_NONE_RELEASE) {
             retval = sdljoy_autorepeat();
@@ -1336,7 +1567,7 @@ int sdl_ui_print_center(const char *text, int pos_y)
         return 0;
     }
 
-    len = strlen(text);
+    len = (int)strlen(text);
 
     if (len == 0) {
         return 0;
@@ -1402,8 +1633,9 @@ void sdl_ui_invert_char(int pos_x, int pos_y)
 
 void sdl_ui_activate(void)
 {
-    if (ui_emulation_is_paused()) {
-        ui_pause_emulation(0);
+    sdl_pause_state = ui_pause_active();
+    if (sdl_pause_state) {
+        ui_pause_disable();
     }
     interrupt_maincpu_trigger_trap(sdl_ui_trap, NULL);
 }
@@ -1463,12 +1695,12 @@ char* sdl_ui_readline(const char* previous, int pos_x, int pos_y)
     pc_vkbd_state = archdep_require_vkbd();
 
     if (previous) {
-        new_string = lib_stralloc(previous);
+        new_string = lib_strdup(previous);
         size = strlen(new_string) + 1;
         if (size < max) {
             new_string = lib_realloc(new_string, max);
         } else {
-            ui_error("Readline: previous %i >= max %i, returning NULL.", size, max);
+            ui_error("Readline: previous %" PRI_SIZE_T " >= max %" PRI_SIZE_T ", returning NULL.", size, max);
             lib_free(new_string);
             return NULL;
         }
@@ -1490,7 +1722,7 @@ char* sdl_ui_readline(const char* previous, int pos_x, int pos_y)
     /* draw previous string (if any), initialize size and cursor position */
     size = i = sdl_ui_print_wrap(new_string, pos_x, &pos_y);
 
-#ifndef USE_SDLUI2
+#ifndef USE_SDL2UI
     SDL_EnableUNICODE(1);
 #endif
 
@@ -1549,7 +1781,7 @@ char* sdl_ui_readline(const char* previous, int pos_x, int pos_y)
                 i = 0;
                 break;
             case VICE_SDLK_END:
-                i = size;
+                i = (int)size;
                 break;
             case PC_VKBD_ACTIVATE:
                 pc_vkbd_state ^= 1;
@@ -1607,7 +1839,7 @@ char* sdl_ui_readline(const char* previous, int pos_x, int pos_y)
         }
     } while (!done);
 
-#ifndef USE_SDLUI2
+#ifndef USE_SDL2UI
     SDL_EnableUNICODE(0);
 #endif
 
@@ -1668,7 +1900,7 @@ void sdl_ui_scroll_screen_up(void)
     }
 }
 
-/* handler for the sliders used in the colour- and CRT emulation settings 
+/* handler for the sliders used in the colour- and CRT emulation settings
    a custom handler is needed so we can print the colour matrix on the screen
    with the slider, and to call sdl_ui_slider to enable realtime updates of the
    respective resources.
@@ -1723,7 +1955,7 @@ void sdl_ui_set_active_font(ui_menu_active_font_t f)
 {
     int i;
     menufont_t *font;
-    
+
     switch (f) {
         case MENU_FONT_IMAGES:
             font = &imagefont;
@@ -1736,7 +1968,7 @@ void sdl_ui_set_active_font(ui_menu_active_font_t f)
             font = &menufont;
             break;
     }
- 
+
     activefont.font = font->font;
     activefont.w = font->w;
     activefont.h = font->h;
@@ -1792,10 +2024,99 @@ void sdl_ui_set_monitor_font(uint8_t *font, int w, int h)
  */
 void sdl_ui_menu_shutdown(void)
 {
-    if (draw_buffer_backup != NULL) {
-        lib_free(draw_buffer_backup);
-    }
+    sdl_ui_destroy_draw_buffer_backup();
+
     if (menu_offsets != NULL) {
         lib_free(menu_offsets);
+    }
+}
+
+/*
+ * Additions for UI actions
+ */
+
+/** \brief  Activate menu item by action ID
+ *
+ * Look up action map and trigger its menu item's callback.
+ * Only tested with a file selection dialog so far.
+ *
+ * \param[in]   action  UI action ID
+ */
+void sdl_ui_menu_item_activate_by_action(int action)
+{
+    ui_action_map_t *map = ui_action_map_get(action);
+#if 0
+    printf("%s(): map = %p\n", __func__, (const void *)map);
+#endif
+    if (map != NULL) {
+        sdl_ui_activate_item_action(map);
+    }
+}
+
+
+/** \brief  Set menu item status field by action ID
+ *
+ * \param[in]   action  UI action ID
+ * \param[in]   status  status for menu item
+ */
+void sdl_ui_menu_item_set_status_by_action(int                   action,
+                                           ui_menu_status_type_t status)
+{
+    ui_action_map_t *map = ui_action_map_get(action);
+    if (map != NULL && map->menu_item[0] != NULL) {
+        ui_menu_entry_t *item = map->menu_item[0];
+        item->status = status;
+    }
+}
+
+
+/** \brief  Public UI action handler to activate a menu item
+ *
+ * Activates the \c activated path of a menu item's callback. Any action that
+ * is marked as blocking and/or a dialog must call \c ui_action_finish() inside
+ * the menu item's callback.
+ *
+ * \param[in]   map action map
+ */
+void sdl_ui_activate_item_action(ui_action_map_t *map)
+{
+    ui_menu_entry_t *item = map->menu_item[0];
+
+    if (item != NULL) {
+        if (sdl_menu_state) {
+            /* Menu is already active.
+             * We can't call sdl_ui_menu_item_activate() because that would trigger
+             * the action again */
+            if (item->callback != NULL) {
+                item->callback(1 /*activated*/, item->data);
+            } else {
+                log_error(LOG_DEFAULT, "%s(): no callback to trigger!", __func__);
+            }
+        } else {
+            /* menu isn't active, set trap */
+            interrupt_maincpu_trigger_trap(sdl_ui_trap, item);
+        }
+    } else {
+        log_error(LOG_DEFAULT, "%s(): ERROR: item is NULL", __func__);
+    }
+}
+
+/** \brief  Public UI action handler to toggle a resource
+ *
+ * Toggles resource in the \c data member of \a map.
+ *
+ * \param[in]   map action map
+ */
+void sdl_ui_toggle_resource_action(ui_action_map_t *map)
+{
+    const char *resource = map->data;
+    int         value    = 0;
+
+    resources_get_int(resource, &value);
+    resources_set_int(resource, !value);
+    /* shouldn't be required, but some resource toggles can be expensive, so
+     * we might have to mark some actions blocking */
+    if (map->blocks) {
+        ui_action_finish(map->action);
     }
 }

@@ -29,12 +29,12 @@
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdbool.h>
 
 #include "alarm.h"
 #include "archdep.h"
 #include "attach.h"
 #include "autostart.h"
-#include "clkguard.h"
 #include "cmdline.h"
 #include "console.h"
 #include "diskimage.h"
@@ -43,7 +43,9 @@
 #include "fliplist.h"
 #include "fsdevice.h"
 #include "gfxoutput.h"
+#include "initcmdline.h"
 #include "interrupt.h"
+#include "joystick.h"
 #include "kbdbuf.h"
 #include "keyboard.h"
 #include "lib.h"
@@ -54,8 +56,11 @@
 #include "mem.h"
 #include "monitor.h"
 #include "monitor_network.h"
+#include "monitor_binary.h"
 #include "network.h"
+#include "palette.h"
 #include "printer.h"
+#include "profiler.h"
 #include "resources.h"
 #include "romset.h"
 #include "screenshot.h"
@@ -65,6 +70,8 @@
 #include "traps.h"
 #include "types.h"
 #include "uiapi.h"
+#include "uiactions.h"
+#include "uihotkeys.h"
 #include "util.h"
 #include "video.h"
 #include "vsync.h"
@@ -72,77 +79,81 @@
 
 /* #define DEBUGMACHINE */
 
-#ifdef WIN32_COMPILE
-# include "joy.h"
-#else
-# ifdef HAS_JOYSTICK
-#  include "joy.h"
-#  endif
-#endif
-
 #ifndef EXIT_SUCCESS
 #define EXIT_SUCCESS 0
 #endif
 
 #ifdef DEBUGMACHINE
-#define DBG(x) printf x
+#define DBG(x) log_printf x
 #else
 #define DBG(x)
 #endif
 
 static int machine_init_was_called = 0;
-static int mem_initialized = 0;
-static int ignore_jam = 0;
+static bool is_jammed = false;
+static char *jam_reason = NULL;
 static int jam_action = MACHINE_JAM_ACTION_DIALOG;
 int machine_keymap_index;
 static char *ExitScreenshotName = NULL;
 static char *ExitScreenshotName1 = NULL;
+static bool is_first_reset = true;
 
-
-
+/* NOTE: this function is very similar to drive_jam - in case the behavior
+         changes, change drive_jam too */
 unsigned int machine_jam(const char *format, ...)
 {
-    char *str;
     va_list ap;
     ui_jam_action_t ret = JAM_NONE;
-
-    if (ignore_jam > 0) {
-        return JAM_NONE;
-    }
-
-    va_start(ap, format);
-    str = lib_mvsprintf(format, ap);
-    va_end(ap);
-
-    log_message(LOG_DEFAULT, "*** %s", str);
-
-    if (jam_action == MACHINE_JAM_ACTION_DIALOG) {
-        if (monitor_is_remote()) {
-            ret = monitor_network_ui_jam_dialog(str);
-        } else {
-            ret = ui_jam_dialog(str);
-        }
-    } else if (jam_action == MACHINE_JAM_ACTION_QUIT) {
-        archdep_vice_exit(EXIT_SUCCESS);
-    } else {
-        int actions[4] = {
-            -1, UI_JAM_MONITOR, UI_JAM_RESET, UI_JAM_HARD_RESET
-        };
-        ret = actions[jam_action - 1];
-    }
-    lib_free(str);
 
     /* always ignore subsequent JAMs. reset would clear the flag again, not
      * setting it when going to the monitor would just repeatedly pop up the
      * jam dialog (until reset)
      */
-    ignore_jam = 1;
+    if (is_jammed) {
+        return JAM_NONE;
+    }
+
+    is_jammed = true;
+
+    va_start(ap, format);
+    if (jam_reason) {
+        lib_free(jam_reason);
+        jam_reason = NULL;
+    }
+    jam_reason = lib_mvsprintf(format, ap);
+    va_end(ap);
+
+    log_message(LOG_DEFAULT, "*** %s", jam_reason);
+
+    vsync_suspend_speed_eval();
+    sound_suspend();
+
+    if (jam_action == MACHINE_JAM_ACTION_DIALOG) {
+        if (monitor_is_remote() || monitor_is_binary()) {
+            if (monitor_is_remote()) {
+                ret = monitor_network_ui_jam_dialog("%s", jam_reason);
+            }
+
+            if (monitor_is_binary()) {
+                ret = monitor_binary_ui_jam_dialog("%s", jam_reason);
+            }
+        } else if (!console_mode) {
+            ret = ui_jam_dialog("%s", jam_reason);
+        }
+    } else if (jam_action == MACHINE_JAM_ACTION_QUIT) {
+        archdep_vice_exit(EXIT_SUCCESS);
+    } else {
+        int actions[4] = {
+            -1, UI_JAM_MONITOR, UI_JAM_RESET_CPU, UI_JAM_POWER_CYCLE
+        };
+        ret = actions[jam_action - 1];
+    }
 
     switch (ret) {
-        case UI_JAM_RESET:
-            return JAM_RESET;
-        case UI_JAM_HARD_RESET:
-            return JAM_HARD_RESET;
+        case UI_JAM_RESET_CPU:
+            return JAM_RESET_CPU;
+        case UI_JAM_POWER_CYCLE:
+            return JAM_POWER_CYCLE;
         case UI_JAM_MONITOR:
             return JAM_MONITOR;
         default:
@@ -151,20 +162,57 @@ unsigned int machine_jam(const char *format, ...)
     return JAM_NONE;
 }
 
+bool machine_is_jammed(void)
+{
+    return is_jammed;
+}
+
+char *machine_jam_reason(void)
+{
+    return jam_reason;
+}
+
+void machine_powerup(void)
+{
+    /* HACK: using 0 as the initial compare value allows us to skip the multiple
+       calls to this function that happen at startup, due to the default values
+       for resources being initialized. The actual first reset, which also
+       triggers a powerup call, will happen at clock value 6, so this is safe */
+    static CLOCK powerup_clk = 0;
+
+    DBG(("machine_powerup clk:%08x %s", maincpu_clk, (maincpu_clk == powerup_clk) ? "(skip mem init)":"init memory" ));
+
+    machine_specific_powerup();
+
+    /* some functions we can omit, if the cpu did not run since last call */
+    if (maincpu_clk != powerup_clk) {
+        mem_powerup();
+    }
+
+    powerup_clk = maincpu_clk;
+}
+
 static void machine_trigger_reset_internal(const unsigned int mode)
 {
-    ignore_jam = 0;
+    DBG(("machine_trigger_reset_internal (%s)", mode == MACHINE_RESET_MODE_POWER_CYCLE ? "power cycle":"reset"));
+
+    is_jammed = false;
+
+    if (jam_reason) {
+        lib_free(jam_reason);
+        jam_reason = NULL;
+    }
 
     switch (mode) {
-        case MACHINE_RESET_MODE_HARD:
-            vsync_frame_counter = 0;
-            mem_initialized = 0; /* force memory initialization */
-            machine_specific_powerup();
+        case MACHINE_RESET_MODE_POWER_CYCLE:
+            machine_powerup();
         /* Fall through.  */
-        case MACHINE_RESET_MODE_SOFT:
+        case MACHINE_RESET_MODE_RESET_CPU:
             maincpu_trigger_reset();
             break;
     }
+
+    ui_display_reset(0, mode);
 }
 
 void machine_trigger_reset(const unsigned int mode)
@@ -186,19 +234,32 @@ void machine_reset_event_playback(CLOCK offset, void *data)
     machine_trigger_reset_internal(((unsigned int*)data)[0]);
 }
 
+/* called via cpu_reset() */
+/* CAUTION: this function is only called when the CPU core is "clocked" (ie the
+   emulated machine is running). In particular that means that multiple calls
+   to the machine_trigger_reset() function will not result in multiple calls
+   to this function (if the cpu core is not running). */
+/* NOTE: To make sure things work "as expected", really only deal with "reset"
+   in the function below - anything related to "powerup" should go into
+   machine_powerup() instead */
+
+extern log_t maincpu_log;   /* FIXME: where should this live? */
+
 void machine_reset(void)
 {
-    log_message(LOG_DEFAULT, "Main CPU: RESET.");
+    log_message(maincpu_log, "RESET.");
 
-    ignore_jam = 0;
+    is_jammed = false;
 
-    /* Do machine-specific initialization.  */
-    if (!mem_initialized) {
-        mem_powerup();
-        mem_initialized = 1;
+    if (jam_reason) {
+        lib_free(jam_reason);
+        jam_reason = NULL;
     }
 
+    /* Do machine-specific initialization.  */
     machine_specific_reset();
+
+    kbdbuf_abort();
 
     autostart_reset();
 
@@ -206,13 +267,19 @@ void machine_reset(void)
 
     event_reset_ack();
 
-    vsync_suspend_speed_eval();
-}
+    /* Give the monitor a chance to break immediately */
+    monitor_reset_hook();
 
-static void machine_maincpu_clk_overflow_callback(CLOCK sub, void *data)
-{
-    alarm_context_time_warp(maincpu_alarm_context, sub, -1);
-    interrupt_cpu_status_time_warp(maincpu_int_status, sub, -1);
+    vsync_reset_hook();
+
+    /* Handle the first machine reset */
+    if (is_first_reset) {
+        is_first_reset = false;
+        /* extra power-up initialization */
+        machine_powerup();
+        /* kick off any requested autostart */
+        initcmdline_check_attach();
+    }
 }
 
 void machine_maincpu_init(void)
@@ -224,19 +291,11 @@ void machine_maincpu_init(void)
 void machine_early_init(void)
 {
     maincpu_alarm_context = alarm_context_new("MainCPU");
-
-    maincpu_clk_guard = clk_guard_new(&maincpu_clk, CLOCK_MAX
-                                      - CLKGUARD_SUB_MIN);
-
-    clk_guard_add_callback(maincpu_clk_guard,
-                           machine_maincpu_clk_overflow_callback, NULL);
 }
 
 int machine_init(void)
 {
     machine_init_was_called = 1;
-
-    machine_video_init();
 
     fsdevice_init();
     file_system_init();
@@ -245,17 +304,19 @@ int machine_init(void)
     return machine_specific_init();
 }
 
-static void machine_maincpu_shutdown(void)
+void machine_maincpu_shutdown(void)
 {
     if (maincpu_alarm_context != NULL) {
         alarm_context_destroy(maincpu_alarm_context);
     }
-    if (maincpu_clk_guard != NULL) {
-        clk_guard_destroy(maincpu_clk_guard);
-    }
 
     lib_free(maincpu_monitor_interface);
     maincpu_shutdown();
+
+    if (jam_reason) {
+        lib_free(jam_reason);
+        jam_reason = NULL;
+    }
 }
 
 static void screenshot_at_exit(void)
@@ -280,9 +341,28 @@ static void screenshot_at_exit(void)
 
 void machine_shutdown(void)
 {
+    int save_on_exit;
+
     if (!machine_init_was_called) {
         /* happens at the -help command line command*/
         return;
+    }
+
+    /*
+     * Avoid SoundRecordDeviceName being written to vicerc when save-on-exit
+     * is enabled. If recording is/was active vicerc will contain some setting
+     * for this resource and display an error.
+     */
+    sound_stop_recording();
+
+    resources_get_int("SaveResourcesOnExit", &save_on_exit);
+    if (save_on_exit) {
+        /*
+         * FIXME: I tried moving this to resources_shutdown, but if you try to save
+         * resources after machine_specific_shutdown() is called then it crashes.
+         * That's a bit of a code smell to me. --dqh 2020-08-01
+         */
+        resources_save(NULL);
     }
 
     screenshot_at_exit();
@@ -293,9 +373,12 @@ void machine_shutdown(void)
     machine_specific_shutdown();
 
     autostart_shutdown();
-#ifdef HAS_JOYSTICK
+
     joystick_close();
+#ifdef MAC_JOYSTICK
+    joy_hidlib_exit();
 #endif
+
     sound_close();
 
     printer_shutdown();
@@ -317,6 +400,7 @@ void machine_shutdown(void)
     console_close_all();
 
     cmdline_shutdown();
+    initcmdline_shutdown();
 
     resources_shutdown();
 
@@ -324,11 +408,19 @@ void machine_shutdown(void)
 
     machine_maincpu_shutdown();
 
+    profile_shutdown();
+
     video_shutdown();
 
     if (!console_mode) {
         ui_shutdown();
+#ifndef USE_HEADLESSUI
+        ui_actions_shutdown();
+        ui_hotkeys_shutdown();
+#endif
     }
+
+    palette_shutdown();
 
     sysfile_shutdown();
 
@@ -344,6 +436,9 @@ void machine_shutdown(void)
     machine_resources_shutdown();
     machine_common_resources_shutdown();
 
+    vsync_shutdown();
+
+    joystick_resources_shutdown();
     sysfile_resources_shutdown();
     zfile_shutdown();
     ui_resources_shutdown();
@@ -352,10 +447,11 @@ void machine_shutdown(void)
     romset_resources_shutdown();
 #ifdef HAVE_NETWORK
     monitor_network_resources_shutdown();
+    monitor_binary_resources_shutdown();
 #endif
-    archdep_shutdown();
+    monitor_resources_shutdown();
 
-    lib_debug_check();
+    archdep_shutdown();
 }
 
 /* --------------------------------------------------------- */
@@ -367,8 +463,8 @@ static int set_jam_action(int val, void *param)
         case MACHINE_JAM_ACTION_DIALOG:
         case MACHINE_JAM_ACTION_CONTINUE:
         case MACHINE_JAM_ACTION_MONITOR:
-        case MACHINE_JAM_ACTION_RESET:
-        case MACHINE_JAM_ACTION_HARD_RESET:
+        case MACHINE_JAM_ACTION_RESET_CPU:
+        case MACHINE_JAM_ACTION_POWER_CYCLE:
         case MACHINE_JAM_ACTION_QUIT:
             break;
         default:
@@ -411,7 +507,7 @@ static resource_string_t resources_string_c128[] = {
 };
 
 static const resource_int_t resources_int[] = {
-    { "JAMAction", MACHINE_JAM_ACTION_DIALOG, RES_EVENT_SAME, NULL,
+    { "JAMAction", MACHINE_JAM_ACTION_CONTINUE, RES_EVENT_SAME, NULL,
       &jam_action, set_jam_action, NULL },
     RESOURCE_INT_LIST_END
 };
@@ -441,7 +537,7 @@ static const cmdline_option_t cmdline_options_c128[] =
 {
     { "-jamaction", SET_RESOURCE, CMDLINE_ATTRIB_NEED_ARGS,
       NULL, NULL, "JAMAction", NULL,
-      "<Type>", "Set action on CPU JAM: (0: Ask, 1: continue, 2: Monitor, 3: Reset, 4: Hard Reset, 5: Quit Emulator)" },
+      "<Type>", "Set action on CPU JAM: (0: Ask, 1: continue, 2: Monitor, 3: Reset, 4: Power cycle, 5: Quit Emulator)" },
     { "-exitscreenshot", SET_RESOURCE, CMDLINE_ATTRIB_NEED_ARGS,
       NULL, NULL, "ExitScreenshotName", NULL,
       "<Name>", "Set name of screenshot to save when emulator exits." },
@@ -455,7 +551,7 @@ static const cmdline_option_t cmdline_options[] =
 {
     { "-jamaction", SET_RESOURCE, CMDLINE_ATTRIB_NEED_ARGS,
       NULL, NULL, "JAMAction", NULL,
-      "<Type>", "Set action on CPU JAM: (0: Ask, 1: continue, 2: Monitor, 3: Reset, 4: Hard Reset, 5: Quit Emulator)" },
+      "<Type>", "Set action on CPU JAM: (0: Ask, 1: continue, 2: Monitor, 3: Reset, 4: Power cycle, 5: Quit Emulator)" },
     { "-exitscreenshot", SET_RESOURCE, CMDLINE_ATTRIB_NEED_ARGS,
       NULL, NULL, "ExitScreenshotName", NULL,
       "<Name>", "Set name of screenshot to save when emulator exits." },
@@ -466,7 +562,7 @@ static const cmdline_option_t cmdline_options_vsid[] =
 {
     { "-jamaction", SET_RESOURCE, CMDLINE_ATTRIB_NEED_ARGS,
       NULL, NULL, "JAMAction", NULL,
-      "<Type>", "Set action on CPU JAM: (0: Ask, 1: continue, 2: Monitor, 3: Reset, 4: Hard Reset, 5: Quit Emulator)" },
+      "<Type>", "Set action on CPU JAM: (0: Ask, 1: continue, 2: Monitor, 3: Reset, 4: Power cycle, 5: Quit Emulator)" },
     CMDLINE_LIST_END
 };
 

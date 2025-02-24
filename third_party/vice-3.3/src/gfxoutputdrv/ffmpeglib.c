@@ -35,8 +35,6 @@
 #include "uiapi.h"
 #include "dynlib.h"
 
-#ifndef STATIC_FFMPEG
-
 /* define major version if its not already defined */
 #ifndef LIBAVCODEC_VERSION_MAJOR
 #define LIBAVCODEC_VERSION_MAJOR  51
@@ -81,7 +79,7 @@ static void *avresample_so = NULL;
 #define GET_SYMBOL_AND_TEST_AVCODEC( _name_ )                              \
     lib->p_##_name_ = (_name_##_t)vice_dynlib_symbol(avcodec_so, #_name_); \
     if (!lib->p_##_name_) {                                                \
-        log_debug("getting symbol " #_name_ " failed!");                   \
+        log_debug(LOG_DEFAULT, "getting symbol " #_name_ " failed!");                   \
         return -1;                                                         \
     }
 
@@ -89,7 +87,7 @@ static void *avresample_so = NULL;
 #define GET_SYMBOL_AND_TEST_AVFORMAT( _name_ )                               \
     lib->p_##_name_ = (_name_##_t)vice_dynlib_symbol(avformat_so, #_name_ ); \
     if (!lib->p_##_name_) {                                                  \
-        log_debug("getting symbol " #_name_ " failed!");                     \
+        log_debug(LOG_DEFAULT, "getting symbol " #_name_ " failed!");                     \
         return -1;                                                           \
     }
 
@@ -97,7 +95,7 @@ static void *avresample_so = NULL;
 #define GET_SYMBOL_AND_TEST_AVUTIL( _name_ )                               \
     lib->p_##_name_ = (_name_##_t)vice_dynlib_symbol(avutil_so, #_name_ ); \
     if (!lib->p_##_name_) {                                                \
-        log_debug("getting symbol " #_name_ " failed!");                   \
+        log_debug(LOG_DEFAULT, "getting symbol " #_name_ " failed!");                   \
         return -1;                                                         \
     }
 
@@ -105,7 +103,7 @@ static void *avresample_so = NULL;
 #define GET_SYMBOL_AND_TEST_SWSCALE( _name_ )                               \
     lib->p_##_name_ = (_name_##_t)vice_dynlib_symbol(swscale_so, #_name_ ); \
     if (!lib->p_##_name_) {                                                 \
-        log_debug("getting symbol " #_name_ " failed!");                    \
+        log_debug(LOG_DEFAULT, "getting symbol " #_name_ " failed!");                    \
         return -1;                                                          \
     }
 
@@ -114,7 +112,7 @@ static void *avresample_so = NULL;
 #define GET_SYMBOL_AND_TEST_SWRESAMPLE( _name_ )                                \
     lib->p_##_name_ = (_name_##_t)vice_dynlib_symbol(swresample_so, #_name_);   \
     if (!lib->p_##_name_) {                                                     \
-    log_debug("getting symbol " #_name_ " failed!");                            \
+    log_debug(LOG_DEFAULT, "getting symbol " #_name_ " failed!");                            \
     return -1;                                                                  \
 }
 #else
@@ -122,7 +120,7 @@ static void *avresample_so = NULL;
 #define GET_SYMBOL_AND_TEST_AVRESAMPLE( _name_ )                                \
     lib->p_##_name_ = (_name_##_t)vice_dynlib_symbol(avresample_so, #_name_);   \
     if (!lib->p_##_name_) {                                                     \
-    log_debug("getting symbol " #_name_ " failed!");                            \
+    log_debug(LOG_DEFAULT, "getting symbol " #_name_ " failed!");                            \
     return -1;                                                                  \
 }
 #endif
@@ -136,7 +134,7 @@ static int check_version(const char *lib_name, void *handle, const char *symbol,
 
     version_func = (ffmpeg_version_t)vice_dynlib_symbol(handle, symbol);
     if (version_func == NULL) {
-        log_debug("ffmpeg %s: version function '%s' not found! error: %s", lib_name, symbol, vice_dynlib_error());
+        log_debug(LOG_DEFAULT, "ffmpeg %s: version function '%s' not found! error: %s", lib_name, symbol, vice_dynlib_error());
         return -1;
     }
 
@@ -163,7 +161,7 @@ static int check_version(const char *lib_name, void *handle, const char *symbol,
         }
     }
 
-    log_debug("ffmpeg %8s lib has version %06x, VICE expects %06x: %s",
+    log_debug(LOG_DEFAULT, "ffmpeg %8s lib has version %06x, VICE expects %06x: %s",
               lib_name, ver_lib, ver_inc, result_msgs[result]);
 
     /* now decide what level of matching fails */
@@ -179,7 +177,7 @@ static int load_avcodec(ffmpeglib_t *lib)
         avcodec_so = vice_dynlib_open(AVCODEC_SO_NAME);
 
         if (!avcodec_so) {
-            log_debug("opening dynamic library " AVCODEC_SO_NAME " failed! error: %s", vice_dynlib_error());
+            log_debug(LOG_DEFAULT, "opening dynamic library " AVCODEC_SO_NAME " failed! error: %s", vice_dynlib_error());
             return -1;
         }
 
@@ -201,7 +199,7 @@ static void free_avcodec(ffmpeglib_t *lib)
 {
     if (avcodec_so) {
         if (vice_dynlib_close(avcodec_so) != 0) {
-            log_debug("closing dynamic library " AVCODEC_SO_NAME " failed!");
+            log_debug(LOG_DEFAULT, "closing dynamic library " AVCODEC_SO_NAME " failed!");
         }
     }
     avcodec_so = NULL;
@@ -221,7 +219,7 @@ static int load_avformat(ffmpeglib_t *lib)
         avformat_so = vice_dynlib_open(AVFORMAT_SO_NAME);
 
         if (!avformat_so) {
-            log_debug("opening dynamic library " AVFORMAT_SO_NAME " failed! error: %s", vice_dynlib_error());
+            log_debug(LOG_DEFAULT, "opening dynamic library " AVFORMAT_SO_NAME " failed! error: %s", vice_dynlib_error());
             return -1;
         }
 
@@ -248,7 +246,7 @@ static void free_avformat(ffmpeglib_t *lib)
 {
     if (avformat_so) {
         if (vice_dynlib_close(avformat_so) != 0) {
-            log_debug("closing dynamic library " AVFORMAT_SO_NAME " failed! error: %s", vice_dynlib_error());
+            log_debug(LOG_DEFAULT, "closing dynamic library " AVFORMAT_SO_NAME " failed! error: %s", vice_dynlib_error());
         }
     }
     avformat_so = NULL;
@@ -272,7 +270,7 @@ static int load_avutil(ffmpeglib_t *lib)
         avutil_so = vice_dynlib_open(AVUTIL_SO_NAME);
 
         if (!avutil_so) {
-            log_debug("opening dynamic library " AVUTIL_SO_NAME " failed! error: %s", vice_dynlib_error());
+            log_debug(LOG_DEFAULT, "opening dynamic library " AVUTIL_SO_NAME " failed! error: %s", vice_dynlib_error());
             return -1;
         }
 
@@ -305,7 +303,7 @@ static void free_avutil(ffmpeglib_t *lib)
 {
     if (avutil_so) {
         if (vice_dynlib_close(avutil_so) != 0) {
-            log_debug("closing dynamic library " AVUTIL_SO_NAME " failed! error: %s", vice_dynlib_error());
+            log_debug(LOG_DEFAULT, "closing dynamic library " AVUTIL_SO_NAME " failed! error: %s", vice_dynlib_error());
         }
     }
     avutil_so = NULL;
@@ -332,7 +330,7 @@ static int load_swscale(ffmpeglib_t *lib)
         swscale_so = vice_dynlib_open(SWSCALE_SO_NAME);
 
         if (!swscale_so) {
-            log_debug("opening dynamic library " SWSCALE_SO_NAME " failed! error: %s", vice_dynlib_error());
+            log_debug(LOG_DEFAULT, "opening dynamic library " SWSCALE_SO_NAME " failed! error: %s", vice_dynlib_error());
             return -1;
         }
 
@@ -348,7 +346,7 @@ static void free_swscale(ffmpeglib_t *lib)
 {
     if (swscale_so) {
         if (vice_dynlib_close(swscale_so) != 0) {
-            log_debug("closing dynamic library " SWSCALE_SO_NAME " failed! error: %s", vice_dynlib_error());
+            log_debug(LOG_DEFAULT, "closing dynamic library " SWSCALE_SO_NAME " failed! error: %s", vice_dynlib_error());
         }
     }
     swscale_so = NULL;
@@ -365,7 +363,7 @@ static int load_swresample(ffmpeglib_t *lib)
         swresample_so = vice_dynlib_open(SWRESAMPLE_SO_NAME);
 
         if (!swresample_so) {
-            log_debug("opening dynamic library " SWRESAMPLE_SO_NAME " failed! error: %s", vice_dynlib_error());
+            log_debug(LOG_DEFAULT, "opening dynamic library " SWRESAMPLE_SO_NAME " failed! error: %s", vice_dynlib_error());
             return -1;
         }
 
@@ -383,7 +381,7 @@ static void free_swresample(ffmpeglib_t *lib)
 {
     if (swresample_so) {
         if (vice_dynlib_close(swresample_so) != 0) {
-            log_debug("closing dynamic library " SWRESAMPLE_SO_NAME " failed! error: %s", vice_dynlib_error());
+            log_debug(LOG_DEFAULT, "closing dynamic library " SWRESAMPLE_SO_NAME " failed! error: %s", vice_dynlib_error());
         }
     }
     swresample_so = NULL;
@@ -401,7 +399,7 @@ static int load_avresample(ffmpeglib_t *lib)
         avresample_so = vice_dynlib_open(AVRESAMPLE_SO_NAME);
 
         if (!avresample_so) {
-            log_debug("opening dynamic library " AVRESAMPLE_SO_NAME " failed! error: %s", vice_dynlib_error());
+            log_debug(LOG_DEFAULT, "opening dynamic library " AVRESAMPLE_SO_NAME " failed! error: %s", vice_dynlib_error());
             return -1;
         }
 
@@ -419,7 +417,7 @@ static void free_avresample(ffmpeglib_t *lib)
 {
     if (avresample_so) {
         if (vice_dynlib_close(avresample_so) != 0) {
-            log_debug("closing dynamic library " AVRESAMPLE_SO_NAME " failed! error: %s", vice_dynlib_error());
+            log_debug(LOG_DEFAULT, "closing dynamic library " AVRESAMPLE_SO_NAME " failed! error: %s", vice_dynlib_error());
         }
     }
     avresample_so = NULL;
@@ -503,14 +501,5 @@ void ffmpeglib_close(ffmpeglib_t *lib)
     free_avresample(lib);
 #endif
 }
-#else
-int ffmpeglib_open(ffmpeglib_t *lib)
-{
-    return 0;
-}
 
-void ffmpeglib_close(ffmpeglib_t *lib)
-{
-}
-#endif
 #endif /* #ifdef HAVE_FFMPEG */

@@ -50,7 +50,7 @@ typedef struct gfxoutputdrv_data_s {
     int iff_rowbytes;
 } gfxoutputdrv_data_t;
 
-STATIC_PROTOTYPE gfxoutputdrv_t iff_drv;
+static gfxoutputdrv_t iff_drv;
 
 static uint8_t powers[8]= { 1, 2, 4, 8, 16, 32, 64, 128 };
 
@@ -348,6 +348,7 @@ static int iffdrv_save_memmap(const char *filename, int x_size, int y_size, uint
 
 static gfxoutputdrv_t iff_drv =
 {
+    GFXOUTPUTDRV_TYPE_SCREENSHOT_IMAGE,
     "IFF",
     "IFF screenshot",
     "iff",

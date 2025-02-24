@@ -6,15 +6,7 @@
 
 /*
  * $VICERES SuperPET        xpet
- * $VICERES Ram9            xpet
- * $VICERES RamA            xpet
  * $VICERES CPUswitch       xpet
- * $VICERES H6809RomAName   xpet
- * $VICERES H6809RomBName   xpet
- * $VICERES H6809RomCName   xpet
- * $VICERES H6809RomDName   xpet
- * $VICERES H6809RomEName   xpet
- * $VICERES H6809RomFName   xpet
  *
  * See the widgets/aciawidget.c file for additional resources.
  */
@@ -44,28 +36,17 @@
 
 #include <gtk/gtk.h>
 
-#include "basewidgets.h"
-#include "widgethelpers.h"
-#include "debug_gtk3.h"
-#include "resources.h"
-#include "openfiledialog.h"
+#include "vice_gtk3.h"
 #include "aciawidget.h"
+#include "resources.h"
+#include "ui.h"
 
 #include "superpetwidget.h"
-
-
-static GtkWidget *superpet_enable_widget = NULL;
-static GtkWidget *acia1_widget = NULL;
-static GtkWidget *cpu_widget = NULL;
-static GtkWidget *rom_widget = NULL;
-static GtkWidget *ram_9xxx_widget = NULL;
-static GtkWidget *ram_axxx_widget = NULL;
 
 
 /** \brief  List of baud rates for the ACIA widget
  */
 static int baud_rates[] = { 300, 1200, 2400, 9600, 19200, -1 };
-
 
 /** \brief  List of CPU types
  */
@@ -77,63 +58,50 @@ static const vice_gtk3_radiogroup_entry_t cpu_types[] = {
 };
 
 
-/** \brief  Handler for the "changed" event of the ROM text boxes
+/** \brief  SuperPET enable toggle button */
+static GtkWidget *enable_widget = NULL;
+
+/** \brief  ACIA widget */
+static GtkWidget *acia1_widget = NULL;
+
+/** \brief  CPU widget */
+static GtkWidget *cpu_widget = NULL;
+
+/** \brief  User-defined callback function
  *
- * \param[in]   widget      text entry
- * \param[in]   user_data   ROM index ('A'-'F') (`int`)
+ * Set with pet_superpet_widget_set_superpet_enable_callback()
  */
-static void on_superpet_rom_changed(GtkWidget *widget, gpointer user_data)
-{
-    int rom = GPOINTER_TO_INT(user_data);
-    const char *path = gtk_entry_get_text(GTK_ENTRY(widget));
-
-    debug_gtk3("setting H6809Rom%cName to '%s'.", rom, path);
-    resources_set_string_sprintf("H6809Rom%cName", path, rom);
-}
+static void (*user_callback_enable)(int);
 
 
-/** \brief  Handler for the "clicked" event of the ROM browse buttons
+/** \brief  Callback for the check button widget
  *
- * \param[in]   widget      button
- * \param[in]   user_data   ROM index ('A'-'F') (`int`)
+ * \param[in]   widget   check button widget
+ * \param[in]   enabled  enabled or not
  */
-static void on_superpet_rom_browse_clicked(GtkWidget *widget, gpointer user_data)
+static void superpet_enable_callback(GtkWidget *widget, int enabled)
 {
-    int rom = GPOINTER_TO_INT(user_data);
-    gchar *filename;
-    char title[256];
-
-    g_snprintf(title, 256, "Select $%cXXX ROM", rom);
-
-    filename = vice_gtk3_open_file_dialog(title, NULL, NULL, NULL);
-    if (filename != NULL) {
-        GtkWidget *grid;
-        GtkWidget *entry;
-        int row;
-
-        /* determine location of related text entry */
-        row = rom - 'A' + 1;
-        grid = gtk_widget_get_parent(widget);
-        entry = gtk_grid_get_child_at(GTK_GRID(grid), 1, row);
-
-        /* update text entry, forcing update of the related resource */
-        gtk_entry_set_text(GTK_ENTRY(entry), filename);
-
-        g_free(filename);
+    if (user_callback_enable != NULL) {
+        user_callback_enable(enabled);
     }
 }
 
-
 /** \brief  Create check button for the SuperPET resource
  *
- * \return  GtkCheckButton
+ * Create a grid with a check button and some informative text under it.
+ *
+ * \return  GtkGrid
  */
 static GtkWidget *create_superpet_enable_widget(void)
 {
-    return vice_gtk3_resource_check_button_new("SuperPET",
-            "I/O Enable (disables x96)");
-}
+    GtkWidget *check;
 
+    check = vice_gtk3_resource_check_button_new("SuperPET", "I/O Enable (disables 8x96)");
+    vice_gtk3_resource_check_button_add_callback(check, superpet_enable_callback);
+    gtk_widget_set_valign(check, GTK_ALIGN_START);
+
+    return check;
+}
 
 /** \brief  Create SuperPET CPU selection widget
  *
@@ -144,95 +112,24 @@ static GtkWidget *create_superpet_enable_widget(void)
 static GtkWidget *create_superpet_cpu_widget(void)
 {
     GtkWidget *grid;
-    GtkWidget *group;
     GtkWidget *label;
+    GtkWidget *group;
 
-    grid = vice_gtk3_grid_new_spaced(VICE_GTK3_DEFAULT, VICE_GTK3_DEFAULT);
-
+    grid  = gtk_grid_new();
     label = gtk_label_new(NULL);
+    group = vice_gtk3_resource_radiogroup_new("CPUswitch",
+                                              cpu_types,
+                                              GTK_ORIENTATION_VERTICAL);
+
+    gtk_grid_set_column_spacing(GTK_GRID(grid), 8);
+    gtk_grid_set_row_spacing(GTK_GRID(grid), 8);
     gtk_label_set_markup(GTK_LABEL(label), "<b>CPU type</b>");
     gtk_widget_set_halign(label, GTK_ALIGN_START);
+
     gtk_grid_attach(GTK_GRID(grid), label, 0, 0, 1, 1);
-
-    group = vice_gtk3_resource_radiogroup_new(
-            "CPUswitch",
-            cpu_types,
-            GTK_ORIENTATION_VERTICAL);
-    g_object_set(G_OBJECT(group), "margin-left", 16, NULL);
     gtk_grid_attach(GTK_GRID(grid), group, 0, 1, 1, 1);
-
     gtk_widget_show_all(grid);
     return grid;
-}
-
-
-/** \brief  Create widget to select SuperCPU ROMs at $A000-$FFFF
- *
- * \return  GtkGrid
- */
-static GtkWidget *create_superpet_rom_widget(void)
-{
-    GtkWidget *grid;
-    int bank;
-
-    grid = uihelpers_create_grid_with_label("6809 ROMs", 3);
-    gtk_grid_set_column_spacing(GTK_GRID(grid), 8);
-
-    for (bank = 0; bank < 6; bank++) {
-
-        GtkWidget *label;
-        GtkWidget *entry;
-        GtkWidget *browse;
-        gchar buffer[64];
-        const char *path;
-
-        /* assumes ASCII, should be safe, except for old IBM main frames */
-        g_snprintf(buffer, 64, "$%cxxx", bank + 'A');
-        label = gtk_label_new(buffer);
-        g_object_set(label, "margin-left", 16, NULL);
-
-        entry = gtk_entry_new();
-        gtk_widget_set_hexpand(entry, TRUE);
-        resources_get_string_sprintf("H6809rom%cName", &path, bank + 'A');
-        gtk_entry_set_text(GTK_ENTRY(entry), path);
-
-        browse = gtk_button_new_with_label("Browse ...");
-
-        gtk_grid_attach(GTK_GRID(grid), label, 0, bank + 1, 1, 1);
-        gtk_grid_attach(GTK_GRID(grid), entry, 1, bank + 1, 1, 1);
-        gtk_grid_attach(GTK_GRID(grid), browse, 2, bank + 1, 1, 1);
-
-        /* hook up event handlers */
-        g_signal_connect(entry, "changed", G_CALLBACK(on_superpet_rom_changed),
-                GINT_TO_POINTER(bank + 'A'));
-        g_signal_connect(browse, "clicked",
-                G_CALLBACK(on_superpet_rom_browse_clicked),
-                GINT_TO_POINTER(bank + 'A'));
-
-    }
-
-    gtk_widget_show_all(grid);
-    return grid;
-}
-
-
-/** \brief  Create check button for the Ram9 resource
- *
- * \return  GtkCheckButton
- */
-static GtkWidget *create_superpet_9xxx_ram_widget(void)
-{
-    return vice_gtk3_resource_check_button_new("Ram9", "$9XXX as RAM");
-}
-
-
-/** \brief  Create check button for the RamA resource
- *
- * \return  GtkCheckButton
- */
-static GtkWidget *create_superpet_axxx_ram_widget(void)
-{
-    return vice_gtk3_resource_check_button_new("RamA", "$AXXX as RAM");
 }
 
 
@@ -243,38 +140,38 @@ static GtkWidget *create_superpet_axxx_ram_widget(void)
 GtkWidget *superpet_widget_create(void)
 {
     GtkWidget *grid;
-    GtkWidget *label;
 
-    grid = vice_gtk3_grid_new_spaced(VICE_GTK3_DEFAULT, VICE_GTK3_DEFAULT);
+    grid = gtk_grid_new();
+    gtk_grid_set_column_spacing(GTK_GRID(grid), 16);
+    gtk_grid_set_row_spacing(GTK_GRID(grid), 16);
 
-    label = gtk_label_new(NULL);
-    gtk_label_set_markup(GTK_LABEL(label), "<b>SuperPET settings</b>");
-    gtk_widget_set_halign(label, GTK_ALIGN_START);
-    gtk_grid_attach(GTK_GRID(grid), label, 0, 0, 3, 1);
-
-    superpet_enable_widget = create_superpet_enable_widget();
-    gtk_grid_attach(GTK_GRID(grid), superpet_enable_widget, 0, 1, 3, 1);
-
-    acia1_widget = acia_widget_create(baud_rates);
-    gtk_grid_attach(GTK_GRID(grid), acia1_widget, 0, 2, 3, 1);
-
-    cpu_widget = create_superpet_cpu_widget();
-    gtk_grid_attach(GTK_GRID(grid), cpu_widget, 0, 3, 1, 3);
-
-    rom_widget = create_superpet_rom_widget();
-    gtk_grid_attach(GTK_GRID(grid), rom_widget, 1 ,3 , 2, 3);
-
-    ram_9xxx_widget = create_superpet_9xxx_ram_widget();
-    g_object_set(ram_9xxx_widget, "margin-left", 8, NULL);
-    gtk_widget_set_vexpand(ram_9xxx_widget, TRUE);
-    gtk_widget_set_valign(ram_9xxx_widget, GTK_ALIGN_END);
-    ram_axxx_widget = create_superpet_axxx_ram_widget();
-    g_object_set(ram_axxx_widget, "margin-left", 8, NULL);
-    gtk_widget_set_valign(ram_axxx_widget, GTK_ALIGN_END);
-
-    gtk_grid_attach(GTK_GRID(grid), ram_9xxx_widget, 0, 4, 1, 1);
-    gtk_grid_attach(GTK_GRID(grid), ram_axxx_widget, 0, 5, 1, 1);
+    acia1_widget  = acia_widget_create(baud_rates);
+    cpu_widget    = create_superpet_cpu_widget();
+    enable_widget = create_superpet_enable_widget();
+    gtk_grid_attach(GTK_GRID(grid), acia1_widget,  0, 2, 2, 1);
+    gtk_grid_attach(GTK_GRID(grid), cpu_widget,    0, 3, 1, 1);
+    gtk_grid_attach(GTK_GRID(grid), enable_widget, 1, 3, 1, 1);
 
     gtk_widget_show_all(grid);
     return grid;
+}
+
+
+/** \brief  Set function to trigger on SuperPET enable checkbox toggle
+ *
+ * \param[in]   func    callback function
+ */
+void pet_superpet_widget_set_superpet_enable_callback(void (*func)(int))
+{
+    user_callback_enable = func;
+}
+
+
+/** \brief  Synchronize \a widget with its resource
+ *
+ * \param[in,out]   widget  SuperPET I/O enabled widget
+ */
+void pet_superpet_enable_widget_sync(void)
+{
+    vice_gtk3_resource_check_button_sync(enable_widget);
 }

@@ -1,5 +1,5 @@
 /** \file   cwdwidget.h
- * \brief   Widget to set working directory - header
+ * \brief   Widget to set the current working directory - header
  *
  * \author  Bas Wassink <b.wassink@ziggo.nl>
  */
@@ -28,7 +28,6 @@
 #ifndef VICE_CWDWIDGET_H
 #define VICE_CWDWIDGET_H
 
-#include "vice.h"
 #include <gtk/gtk.h>
 
 GtkWidget *cwd_widget_create(void);

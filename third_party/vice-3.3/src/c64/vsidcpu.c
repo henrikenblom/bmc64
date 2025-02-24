@@ -52,6 +52,10 @@
 */
 
 #ifdef FEATURE_CPUMEMHISTORY
+
+/* FIXME: the following functions should handle IO/RAM/ROM and -dummy accesses
+ * for the memmap feature - see mainc64cpu.c */
+
 static void memmap_mem_store(unsigned int addr, unsigned int value)
 {
     if ((addr >= 0xd000) && (addr <= 0xdfff)) {
@@ -60,6 +64,16 @@ static void memmap_mem_store(unsigned int addr, unsigned int value)
         monitor_memmap_store(addr, MEMMAP_RAM_W);
     }
     (*_mem_write_tab_ptr[(addr) >> 8])((uint16_t)(addr), (uint8_t)(value));
+}
+
+static void memmap_mem_store_dummy(unsigned int addr, unsigned int value)
+{
+    if ((addr >= 0xd000) && (addr <= 0xdfff)) {
+        monitor_memmap_store(addr, MEMMAP_I_O_W);
+    } else {
+        monitor_memmap_store(addr, MEMMAP_RAM_W);
+    }
+    (*_mem_write_tab_ptr_dummy[(addr) >> 8])((uint16_t)(addr), (uint8_t)(value));
 }
 
 static void memmap_mark_read(unsigned int addr)
@@ -91,6 +105,12 @@ static uint8_t memmap_mem_read(unsigned int addr)
 {
     memmap_mark_read(addr);
     return (*_mem_read_tab_ptr[(addr) >> 8])((uint16_t)(addr));
+}
+
+static uint8_t memmap_mem_read_dummy(unsigned int addr)
+{
+    memmap_mark_read(addr);
+    return (*_mem_read_tab_ptr_dummy[(addr) >> 8])((uint16_t)(addr));
 }
 #endif
 

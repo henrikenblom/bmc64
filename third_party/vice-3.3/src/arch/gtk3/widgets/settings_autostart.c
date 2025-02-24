@@ -11,8 +11,11 @@
  * $VICERES AutostartPrgDiskImage               -vsid
  * $VICERES AutostartRunWithColon               -vsid
  * $VICERES AutostartBasicLoad                  -vsid
+ * $VICERES AutostartTapeBasicLoad              -vsid -xpet -xcbm2 -xcbm5x0
  * $VICERES AutostartWarp                       -vsid
  * $VICERES AutostartHandleTrueDriveEmulation   -vsid
+ * $VICERES AutostartOnDoubleClick              -vsid
+ * $VICERES AutostartDropMode                   -vsid
  */
 
 /*
@@ -45,8 +48,8 @@
 #include "vice_gtk3.h"
 #include "machine.h"
 #include "resources.h"
+#include "autostart.h"
 #include "autostart-prg.h"
-#include "resourcewidgetmanager.h"
 #include "uisettings.h"
 
 #include "settings_autostart.h"
@@ -55,230 +58,209 @@
 /** \brief  Autostart modes for PRG files
  */
 static const vice_gtk3_radiogroup_entry_t autostart_modes[] = {
-    { "Virtual FS",         AUTOSTART_PRG_MODE_VFS /* 0 */ },
-    { "Inject into RAM",    AUTOSTART_PRG_MODE_INJECT /* 1 */ },
-    { "Copy to D64",        AUTOSTART_PRG_MODE_DISK /* 2 */ },
-   { NULL, -1 }
+    { "Virtual filesystem", AUTOSTART_PRG_MODE_VFS },
+    { "Inject into RAM",    AUTOSTART_PRG_MODE_INJECT },
+    { "Copy to disk",       AUTOSTART_PRG_MODE_DISK },
+    { NULL,                 -1 }
+};
+
+/** \brief  Autostart behaviour when dropping image on the emulator window */
+static const vice_gtk3_radiogroup_entry_t autostart_drop_modes[] = {
+    { "Attach image only",          AUTOSTART_DROP_MODE_ATTACH },
+    { "Attach image and LOAD",      AUTOSTART_DROP_MODE_LOAD },
+    { "Attach image, LOAD and RUN", AUTOSTART_DROP_MODE_RUN },
+    { NULL,                         -1 }
 };
 
 
-/** \brief  Keeps track of resources in the UI
- */
-static resource_widget_manager_t manager;
-
-
-
 /*
- * Event handlers
+ * Layout helpers
  */
 
-
-/** \brief  Handler for the "destroy" event of the main widget
+/** \brief  Add widgets to set autostart dleay-related resources
  *
- * Cleans up resource used by the resource widget manager
+ * \param[in]   grid    main grid
+ * \param[in]   row     row in \a grid to start adding widgets
+ * \param[in]   columns columns in \a grid to use for proper widget column spans
  *
- * \param[in]   widget  widget triggering the event (unused)
- * \param[in]   data    extra event data (unused)
+ * \return  row in \a grid for more widgets
  */
-static void on_destroy(GtkWidget *widget, gpointer data)
+static int create_delay_layout(GtkWidget *grid, int row, int columns)
 {
-    debug_gtk3("calling vice_resource_wiget_manager_exit()");
-    vice_resource_widget_manager_exit(&manager);
-}
-
-
-/*
- * Widget helpers
- */
-
-
-/** \brief  Create widget to control "AutostartDelay" resource
- *
- * \return  grid
- */
-static GtkWidget *create_fixed_delay_widget(void)
-{
-    GtkWidget *layout;
     GtkWidget *label;
-    GtkWidget *spin;
-    GtkWidget *help;
+    GtkWidget *random_delay;
+    GtkWidget *fixed_delay;
+    GtkWidget *info_label;
 
-    layout = vice_gtk3_grid_new_spaced(16, 0);
-
-    label  = gtk_label_new("Autostart fixed delay:");
+    /* bold header */
+    label = gtk_label_new(NULL);
+    gtk_label_set_markup(GTK_LABEL(label), "<b>Autostart delay settings</b>");
     gtk_widget_set_halign(label, GTK_ALIGN_START);
-    g_object_set(label, "margin", 8, NULL);
+    gtk_widget_set_margin_top(label, 16);
+    gtk_widget_set_margin_bottom(label, 8);
+    gtk_grid_attach(GTK_GRID(grid), label, 0, row, columns, 1);
+    row++;
 
-    spin = vice_gtk3_resource_spin_int_new("AutostartDelay",
-            0, 1000, 1);
-    /* register with manager */
-    vice_resource_widget_manager_add_widget(&manager, spin, NULL, NULL, NULL, NULL);
+    /* random delay check button */
+    random_delay = vice_gtk3_resource_check_button_new("AutostartDelayRandom",
+                                                       "Add random delay");
+    gtk_grid_attach(GTK_GRID(grid), random_delay, 0, row, columns, 1);
+    row++;
 
-    gtk_grid_attach(GTK_GRID(layout), label, 0, 0, 1, 1);
-    gtk_grid_attach(GTK_GRID(layout), spin, 1, 0, 1, 1);
+    /* fixed delay: label, spin button and info label */
+    label = gtk_label_new("Fixed delay (seconds)");
+    gtk_widget_set_halign(label, GTK_ALIGN_START);
+    fixed_delay = vice_gtk3_resource_spin_int_new("AutostartDelay", 0, 1000, 1);
+    gtk_widget_set_hexpand(fixed_delay, FALSE);
+    gtk_widget_set_vexpand(fixed_delay, FALSE);
+    info_label = gtk_label_new(NULL);
+    gtk_label_set_markup(GTK_LABEL(info_label),
+                        "0 = machine-specific delay for <i>stock</i> KERNAL boot");
+    gtk_widget_set_margin_start(info_label, 8); /* bit of extra margin */
+    gtk_widget_set_halign(info_label, GTK_ALIGN_START);
+    gtk_grid_attach(GTK_GRID(grid), label,       0, row, 1, 1);
+    gtk_grid_attach(GTK_GRID(grid), fixed_delay, 1, row, 1, 1);
+    gtk_grid_attach(GTK_GRID(grid), info_label,  2, row, 1, 1);
+    row++;
 
-    label = gtk_label_new("seconds");
-    gtk_grid_attach(GTK_GRID(layout), label, 2, 0, 1, 1);
-
-    help = gtk_label_new("0 = machine-specific delay for KERNAL boot");
-    gtk_grid_attach(GTK_GRID(layout), help, 0, 2, 3, 1);
-
-    gtk_widget_show_all(layout);
-    return layout;
+    return row;
 }
 
-
-
-/** \brief  Create widget to control "AutostartDelay[Random]" resources
+/** \brief  Add widgets to set PRG-related resources
  *
- * \return  grid
- */
-static GtkWidget *create_delay_widget(void)
-{
-    GtkWidget *grid;
-    GtkWidget *rnd_delay;
-    GtkWidget *fix_delay;
-
-    grid = vice_gtk3_grid_new_spaced_with_label(
-            VICE_GTK3_DEFAULT, VICE_GTK3_DEFAULT, "Delay settings", 3);
-    g_object_set(grid, "margin-top", 8, NULL);
-
-    rnd_delay = vice_gtk3_resource_check_button_new( "AutostartDelayRandom",
-            "Add random delay");
-    vice_resource_widget_manager_add_widget(&manager, rnd_delay,
-            NULL, NULL, NULL, NULL);
-    g_object_set(rnd_delay, "margin-left", 16, NULL);
-    gtk_grid_attach(GTK_GRID(grid), rnd_delay, 0, 2, 1, 1);
-
-    fix_delay = create_fixed_delay_widget();
-    g_object_set(fix_delay, "margin-left", 16, NULL);
-    gtk_grid_attach(GTK_GRID(grid), fix_delay, 0, 3, 1, 1);
-
-    gtk_widget_show_all(grid);
-    return grid;
-}
-
-
-/** \brief  Create widget to control "AutostartPrgDiskImage"
+ * \param[in]   grid    main grid
+ * \param[in]   row     row in \a grid to start adding widgets
+ * \param[in]   columns columns in \a grid to use for proper widget column spans
  *
- * \return grid
+ * \return  row in \a grid for more widgets
  */
-static GtkWidget *create_prg_diskimage_widget(void)
+static int create_prg_layout(GtkWidget *grid, int row, int columns)
 {
-    GtkWidget *grid;
-    GtkWidget *image;
-    const char *patterns[] = { "*.d64", NULL };
+    GtkWidget  *label;
+    GtkWidget  *colon;
+    GtkWidget  *tapebasic;
+    GtkWidget  *diskbasic;
+    GtkWidget  *group;
+    GtkWidget  *image;
+    char        buffer[256];
+    /* FIXME: proper extension per machine (d64 for C64, d71 for C128, d80?
+     *        for PET/CBM-II */
+    const char *patterns[] = { "*.d6[47]", "*.d71", "*.d8[012]", NULL };
 
-    grid = vice_gtk3_grid_new_spaced_with_label(
-            VICE_GTK3_DEFAULT, VICE_GTK3_DEFAULT, "Autostart disk image", 1);
+    /* bold header */
+    label = gtk_label_new(NULL);
+    gtk_label_set_markup(GTK_LABEL(label), "<b>Autostart PRG settings</b>");
+    gtk_widget_set_halign(label, GTK_ALIGN_START);
+    gtk_widget_set_margin_top(label, 16);
+    gtk_widget_set_margin_bottom(label, 8);
+    gtk_grid_attach(GTK_GRID(grid), label, 0, row, columns, 1);
+    row++;
 
-    image = vice_gtk3_resource_browser_new("AutostartPrgDiskImage",
-            patterns, "D64 disk images", "Select D64 image",
-            "autostart disk image", NULL);
-    vice_resource_widget_manager_add_widget(&manager, image,
-            NULL, NULL, NULL, NULL);
-    gtk_grid_attach(GTK_GRID(grid), image, 0, 1, 1, 1);
-
-    gtk_widget_show_all(grid);
-    return grid;
-}
-
-
-/** \brief  Create widget to control PRG-related autostart resources
- *
- * \return  grid
- */
-static GtkWidget *create_prg_widget(void)
-{
-    GtkWidget *grid;
-    GtkWidget *colon;
-    GtkWidget *basic;
-    GtkWidget *mode;
-    GtkWidget *group;
-    GtkWidget *image;
-
-    grid = vice_gtk3_grid_new_spaced_with_label(
-            VICE_GTK3_DEFAULT, VICE_GTK3_DEFAULT, "PRG settings", 3);
-    g_object_set(grid, "margin-top", 8, NULL);
-
+    /* "RUN:" */
     colon = vice_gtk3_resource_check_button_new("AutostartRunWithColon",
-            "Use ':' with RUN");
-    vice_resource_widget_manager_add_widget(&manager, colon,
-            NULL, NULL, NULL, NULL);
-    g_object_set(colon, "margin-left", 16, NULL);
-    gtk_grid_attach(GTK_GRID(grid), colon, 0, 1, 1, 1);
+                                                "Use ':' with RUN");
+    gtk_grid_attach(GTK_GRID(grid), colon, 0, row, columns, 1);
+    row++;
 
-    basic = vice_gtk3_resource_check_button_new("AutostartBasicLoad",
-            "Load to BASIC start");
-    vice_resource_widget_manager_add_widget(&manager, basic,
-            NULL, NULL, NULL, NULL);
-    g_object_set(basic, "margin-left", 16, NULL);
-    gtk_grid_attach(GTK_GRID(grid), basic, 0, 2, 1, 1);
+    /* BASIC start load for tape */
+    if ((machine_class != VICE_MACHINE_CBM5x0) &&
+        (machine_class != VICE_MACHINE_CBM6x0) &&
+        (machine_class != VICE_MACHINE_PET)) {
+        tapebasic = vice_gtk3_resource_check_button_new("AutostartTapeBasicLoad",
+                                                        "Load to BASIC start (Tape)");
+        gtk_grid_attach(GTK_GRID(grid), tapebasic, 0, row, columns, 1);
+        row++;
+    }
 
-    mode = vice_gtk3_grid_new_spaced_with_label(
-            VICE_GTK3_DEFAULT, VICE_GTK3_DEFAULT, "Autostart PRG mode", 1);
+    /* BASIC start load for disk */
+    diskbasic = vice_gtk3_resource_check_button_new("AutostartBasicLoad",
+                                                    "Load to BASIC start (Disk)");
+    gtk_grid_attach(GTK_GRID(grid), diskbasic, 0, row, columns, 1);
+    row++;
+
+    /* autostart mode for PRGs */
+    label = gtk_label_new("Autostart mode");
+    gtk_widget_set_halign(label, GTK_ALIGN_START);
+    gtk_widget_set_valign(label, GTK_ALIGN_START);
     group = vice_gtk3_resource_radiogroup_new("AutostartPrgMode",
-            autostart_modes, GTK_ORIENTATION_VERTICAL);
-    vice_resource_widget_manager_add_widget(&manager, group,
-            NULL, NULL, NULL, NULL);
-    g_object_set(group, "margin-left", 16, NULL);
-    gtk_grid_attach(GTK_GRID(mode), group, 0, 1, 1, 1);
+                                              autostart_modes,
+                                              GTK_ORIENTATION_VERTICAL);
+    gtk_widget_set_margin_top(label, 8);
+    gtk_widget_set_margin_top(group, 8);
+    gtk_grid_attach(GTK_GRID(grid), label, 0, row, 1,           1);
+    gtk_grid_attach(GTK_GRID(grid), group, 1, row, columns - 1, 1);
+    row++;
 
-    gtk_grid_attach(GTK_GRID(grid), mode, 0, 3, 1, 1);
+    /* autostart drop mode */
+    label = gtk_label_new("Drag and Drop mode");
+    gtk_widget_set_valign(label, GTK_ALIGN_START);
+    gtk_widget_set_halign(label, GTK_ALIGN_START);
+    group = vice_gtk3_resource_radiogroup_new("AutostartDropMode",
+                                              autostart_drop_modes,
+                                              GTK_ORIENTATION_VERTICAL);
+    gtk_widget_set_margin_top(label, 8);
+    gtk_widget_set_margin_top(group, 8);
+    gtk_grid_attach(GTK_GRID(grid), label, 0, row, 1,           1);
+    gtk_grid_attach(GTK_GRID(grid), group, 1, row, columns - 1, 1);
+    row++;
 
-    image = create_prg_diskimage_widget();
-    gtk_grid_attach(GTK_GRID(grid), image, 0, 4, 3, 1);
+    /* temporary disk image for AUTO_START_PRG_MODE_DISK */
+    label = gtk_label_new("Autostart disk image");
+    image = vice_gtk3_resource_filechooser_new("AutostartPrgDiskImage",
+                                               GTK_FILE_CHOOSER_ACTION_SAVE);
+    g_snprintf(buffer, sizeof buffer,
+               "Select or create %s autostart disk image",
+               machine_name);
+    vice_gtk3_resource_filechooser_set_custom_title(image, buffer);
+    vice_gtk3_resource_filechooser_set_filter(image,
+                                              "Disk images",
+                                              patterns,
+                                              TRUE);
+    gtk_widget_set_margin_top(label, 16);
+    gtk_widget_set_margin_top(image, 16);
+    gtk_grid_attach(GTK_GRID(grid), label, 0, row, 1,           1);
+    gtk_grid_attach(GTK_GRID(grid), image, 1, row, columns - 1, 1);
 
-    gtk_widget_show_all(grid);
-    return grid;
+    return row + 1;
 }
-
 
 
 /** \brief  Create widget to use in the settings dialog for autostart resources
  *
- * \param[in[   parent  parent widget (unused)
+ * \param[in]   parent  parent widget (unused)
  *
  * \return  grid
  */
 GtkWidget *settings_autostart_widget_create(GtkWidget *parent)
 {
+#define NUM_COLS    3
     GtkWidget *grid;
     GtkWidget *tde;
     GtkWidget *warp;
+    GtkWidget *doubleclick;
+    int        row = 0;
 
-    /* initialize resource widget manager and register with uisettings */
-    debug_gtk3("Initializing resource widget manager and registering it with"
-            " uisettings.c");
-    vice_resource_widget_manager_init(&manager);
-    ui_settings_set_resource_widget_manager(&manager);
+    grid = gtk_grid_new();
+    gtk_grid_set_column_spacing(GTK_GRID(grid), 8);
 
-    grid = vice_gtk3_grid_new_spaced(VICE_GTK3_DEFAULT, VICE_GTK3_DEFAULT);
-    g_object_set(grid, "margin", 8, NULL);
-
-    tde = vice_gtk3_resource_check_button_new(
-            "AutostartHandleTrueDriveEmulation",
-            "Handle True Drive Emulation on autostart");
-    gtk_grid_attach(GTK_GRID(grid), tde, 0, 0, 1, 1);
-    vice_resource_widget_manager_add_widget(&manager, tde, NULL, NULL, NULL, NULL);
+    tde = vice_gtk3_resource_check_button_new("AutostartHandleTrueDriveEmulation",
+                                              "Handle True Drive Emulation on autostart");
+    gtk_grid_attach(GTK_GRID(grid), tde, 0, row, NUM_COLS, 1);
+    row++;
 
     warp = vice_gtk3_resource_check_button_new("AutostartWarp",
-            "Warp on autostart");
-    gtk_grid_attach(GTK_GRID(grid), warp, 0, 1, 1, 1);
-    vice_resource_widget_manager_add_widget(&manager, warp, NULL, NULL, NULL, NULL);
+                                               "Warp on autostart");
+    gtk_grid_attach(GTK_GRID(grid), warp, 0, row, NUM_COLS, 1);
+    row++;
 
-    gtk_grid_attach(GTK_GRID(grid), create_delay_widget(),
-            0, 2, 1, 1);
+    doubleclick = vice_gtk3_resource_check_button_new("AutostartOnDoubleClick",
+                                                      "Double click for autostart");
+    gtk_grid_attach(GTK_GRID(grid), doubleclick, 0, row, NUM_COLS, 1);
+    row++;
 
-    gtk_grid_attach(GTK_GRID(grid), create_prg_widget(),
-            0, 3, 1, 1);
-
-
-    g_signal_connect(grid, "destroy", G_CALLBACK(on_destroy), NULL);
-
-    vice_resource_widget_manager_dump(&manager);
+    row = create_delay_layout(grid, row, NUM_COLS);
+    row = create_prg_layout  (grid, row, NUM_COLS);
+#undef NUM_COLS
     gtk_widget_show_all(grid);
-
-
     return grid;
 }

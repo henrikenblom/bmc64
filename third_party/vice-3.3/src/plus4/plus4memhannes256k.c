@@ -48,7 +48,7 @@
 /* HANNES 256K registers */
 static uint8_t h256k_reg = 0;
 
-static log_t h256k_log = LOG_ERR;
+static log_t h256k_log = LOG_DEFAULT;
 
 static int h256k_activate(int type);
 static int h256k_deactivate(void);
@@ -66,18 +66,20 @@ static void h256k_reg_store(uint16_t addr, uint8_t value);
 static int h256k_dump(void);
 
 static io_source_t h256k_device = {
-    "HANNES",
-    IO_DETACH_CART, /* dummy */
-    NULL,           /* dummy */
-    0xfd16, 0xfd16, 1,
-    1, /* read is always valid */
-    h256k_reg_store,
-    h256k_reg_read,
-    NULL, /* no peek */
-    h256k_dump,
-    0, /* dummy (not a cartridge) */
-    IO_PRIO_NORMAL,
-    0
+    "HANNES",             /* name of the device */
+    IO_DETACH_RESOURCE,   /* use resource to detach the device when involved in a read-collision */
+    "MemoryHack",         /* resource to set to '0' */
+    0xfd16, 0xfd16, 0x00, /* range for the device, reg:$fd16 */
+    1,                    /* read is always valid */
+    h256k_reg_store,      /* store function */
+    NULL,                 /* NO poke function */
+    h256k_reg_read,       /* read function */
+    NULL,                 /* TODO: peek function */
+    h256k_dump,           /* chip state information dump function */
+    IO_CART_ID_NONE,      /* not a cartridge */
+    IO_PRIO_NORMAL,       /* normal priority, device read needs to be checked for collisions */
+    0,                    /* insertion order, gets filled in by the registration function */
+    IO_MIRROR_NONE        /* NO mirroring */
 };
 
 static io_source_list_t *h256k_list_item = NULL;
@@ -88,7 +90,6 @@ int set_h256k_enabled(int val)
         case H256K_DISABLED:
         case H256K_256K:
         case H256K_1024K:
-        case H256K_4096K:
             break;
         default:
             return -1;
@@ -142,15 +143,11 @@ static int h256k_activate(int type)
     switch (type) {
         case 1:
             h256k_ram = lib_realloc((void *)h256k_ram, (size_t)0x30000);
-            log_message(h256k_log, "HANNES 256K expansion installed.");
+            log_message(h256k_log, "HANNES 256KiB expansion installed.");
             break;
         case 2:
             h256k_ram = lib_realloc((void *)h256k_ram, (size_t)0xf0000);
-            log_message(h256k_log, "HANNES 1024K expansion installed.");
-            break;
-        case 3:
-            h256k_ram = lib_realloc((void *)h256k_ram, (size_t)0x3f0000);
-            log_message(h256k_log, "HANNES 4096K expansion installed.");
+            log_message(h256k_log, "HANNES 1MiB expansion installed.");
             break;
     }
     h256k_reset();
@@ -189,9 +186,6 @@ static void h256k_reg_store(uint16_t addr, uint8_t value)
         h256k_bank = h256k_bank + ((3 - ((value & 0xc) >> 2)) << 2);
         h256k_reg = h256k_reg | 0x70;
     }
-    if (h256k_enabled == 3) {
-        h256k_bank = h256k_bank + ((3 - ((value & 0x30) >> 4)) << 4);
-    }
     h256k_bound = (value & 0x80) >> 7;
 }
 
@@ -220,6 +214,11 @@ void h256k_store(uint16_t addr, uint8_t value)
     if (addr >= 0x4000 && h256k_bank != 3) {
         h256k_ram[(real_bank * 0x10000) + addr] = value;
     }
+}
+
+void h256k_ram_inject(uint16_t addr, uint8_t value)
+{
+    h256k_store(addr, value);
 }
 
 uint8_t h256k_read(uint16_t addr)
@@ -253,7 +252,8 @@ uint8_t h256k_read(uint16_t addr)
 
 static int h256k_dump(void)
 {
-    mon_out("RAM at $%04X-$FFFF comes from bank %d\n", (h256k_bound) ? 0x4000 : 0x1000, h256k_bank);
+    mon_out("RAM at $%04X-$FFFF comes from bank %d\n",
+            (h256k_bound) ? 0x4000U : 0x1000U, h256k_bank);
 
     return 0;
 }

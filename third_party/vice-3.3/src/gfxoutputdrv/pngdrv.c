@@ -52,7 +52,7 @@ typedef struct gfxoutputdrv_data_s {
     unsigned int line;
 } gfxoutputdrv_data_t;
 
-STATIC_PROTOTYPE gfxoutputdrv_t png_drv;
+static gfxoutputdrv_t png_drv;
 
 static int pngdrv_open(screenshot_t *screenshot, const char *filename)
 {
@@ -278,6 +278,7 @@ static int pngdrv_save_memmap(const char *filename, int x_size, int y_size, uint
 
 static gfxoutputdrv_t png_drv =
 {
+    GFXOUTPUTDRV_TYPE_SCREENSHOT_IMAGE,
     "PNG",
     "PNG screenshot",
     "png",

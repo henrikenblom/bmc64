@@ -4,7 +4,7 @@
 
 s/@b{Dag Lem}/Dag Lem <resid@nimrod.no>/g
 s/@b{Andreas Matthies}/Andreas Matthies <andreas.matthies@gmx.net>/g
-s/@b{Martin Pottendorfer}/Martin Pottendorfer <pottendo@gmx.net>/g
+s/@b{pottendo}/pottendo <pottendo@gmx.net>/g
 s/@b{Spiro Trikaliotis}/Spiro Trikaliotis <Spiro.Trikaliotis@gmx.de>/g
 s/@b{Marco van den Heuvel}/Marco van den Heuvel <blackystardust68@yahoo.com>/g
 s/@b{Christian Vogelgsang}/Christian Vogelgsang <chris@vogelgsang.org>/g
@@ -178,6 +178,10 @@ s/@b{TMLPiper}/TMLPiper <icolquhoun@users.sourceforge.net>/g
 s/@b{Christopher Phillips}/Christopher Phillips <shrydar@users.sourceforge.net>/g
 s/@b{Michael C. Martin}/Michael C. Martin <mcmartin@gmail.com>/g
 s/@b{Bjoern Odendahl}/Bjoern Odendahl/g
+s/@b{June Tate-Gans}/June Tate-Gans <june@theonelab.com>/g
+s/@b{David Hogan}/David Hogan <david.q.hogan@gmail.com>/g
+s/@b{Empathic Qubit}/Empathic Qubit <empathicqubit@entan.gl>/g
+s/@b{Pablo Roldan}/Pablo Roldan/g
 s/@code{\([^}]*\)}/`\1'/g
 s/@t{\([^}]*\)}/\1/g
 s/@dots{}/..../g

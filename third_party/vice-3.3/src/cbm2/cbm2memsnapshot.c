@@ -29,8 +29,10 @@
 
 #include <stdio.h>
 
+#include "cartridge.h"
 #include "cbm2-resources.h"
 #include "cbm2.h"
+#include "cbm2cart.h"
 #include "cbm2mem.h"
 #include "cbm2memsnapshot.h"
 #include "cbm2rom.h"
@@ -41,7 +43,7 @@
 #include "snapshot.h"
 #include "types.h"
 
-static log_t cbm2_snapshot_log = LOG_ERR;
+static log_t cbm2_snapshot_log = LOG_DEFAULT;
 
 /*
  * CBM2 memory dump should be 128, 256, 512 or 1024k, depending on the
@@ -210,11 +212,13 @@ static int mem_read_ram_snapshot_module(snapshot_t *p)
     cart6_ram = config & 16;
     cartC_ram = config & 32;
 
+#if 0 /* I think these are left over from earlier code, there are no corresponding writes in mem_write_ram_snapshot_module -- dqh */
     if (memsize < 4) {
         SMR_BA(m, mem_ram + 0x10000, memsize << 17);
     } else {
         SMR_BA(m, mem_ram, memsize << 17);
     }
+#endif
 
     if (memsize < 4) {  /* if 1M memory, bank 15 is included */
         if (config & 1) {
@@ -244,6 +248,34 @@ static int mem_read_ram_snapshot_module(snapshot_t *p)
     return 0;
 }
 
+#define NUM_TRAP_DEVICES 9  /* FIXME: is there a better constant ? */
+static int trapfl[NUM_TRAP_DEVICES];
+static int trapdevices[NUM_TRAP_DEVICES + 1] = { 1, 4, 5, 6, 7, 8, 9, 10, 11, -1 };
+
+static void get_trapflags(void)
+{
+    int i;
+    for(i = 0; trapdevices[i] != -1; i++) {
+        resources_get_int_sprintf("VirtualDevice%d", &trapfl[i], trapdevices[i]);
+    }
+}
+
+static void clear_trapflags(void)
+{
+    int i;
+    for(i = 0; trapdevices[i] != -1; i++) {
+        resources_set_int_sprintf("VirtualDevice%d", 0, trapdevices[i]);
+    }
+}
+
+static void restore_trapflags(void)
+{
+    int i;
+    for(i = 0; trapdevices[i] != -1; i++) {
+        resources_set_int_sprintf("VirtualDevice%d", trapfl[i], trapdevices[i]);
+    }
+}
+
 /*********************************************************************/
 
 /*
@@ -270,7 +302,6 @@ static int mem_write_rom_snapshot_module(snapshot_t *p, int save_roms)
 {
     snapshot_module_t *m;
     uint8_t config;
-    int trapfl;
     const char *cart_1_name, *cart_2_name, *cart_4_name, *cart_6_name;
 
     if (!save_roms) {
@@ -284,8 +315,8 @@ static int mem_write_rom_snapshot_module(snapshot_t *p, int save_roms)
     }
 
     /* disable traps before saving the ROM */
-    resources_get_int("VirtualDevices", &trapfl);
-    resources_set_int("VirtualDevices", 0);
+    get_trapflags();
+    clear_trapflags();
 
     resources_get_string("Cart1Name", &cart_1_name);
     resources_get_string("Cart2Name", &cart_2_name);
@@ -329,7 +360,7 @@ static int mem_write_rom_snapshot_module(snapshot_t *p, int save_roms)
     }
 
     /* enable traps again when necessary */
-    resources_set_int("VirtualDevices", trapfl);
+    restore_trapflags();
 
     snapshot_module_close(m);
 
@@ -341,7 +372,7 @@ static int mem_read_rom_snapshot_module(snapshot_t *p)
     uint8_t vmajor, vminor;
     snapshot_module_t *m;
     uint8_t config;
-    int i, trapfl;
+    int i;
 
     m = snapshot_module_open(p, module_rom_name, &vmajor, &vminor);
     if (m == NULL) {
@@ -353,8 +384,8 @@ static int mem_read_rom_snapshot_module(snapshot_t *p)
     }
 
     /* disable traps before loading the ROM */
-    resources_get_int("VirtualDevices", &trapfl);
-    resources_set_int("VirtualDevices", 0);
+    get_trapflags();
+    clear_trapflags();
 
     SMR_B(m, &config);
 
@@ -396,7 +427,7 @@ static int mem_read_rom_snapshot_module(snapshot_t *p)
     cbm2rom_checksum();
 
     /* enable traps again when necessary */
-    resources_set_int("VirtualDevices", trapfl);
+    restore_trapflags();
 
     snapshot_module_close(m);
 
@@ -409,6 +440,7 @@ int cbm2_snapshot_write_module(snapshot_t *p, int save_roms)
 {
     if (mem_write_ram_snapshot_module(p) < 0
         || mem_write_rom_snapshot_module(p, save_roms) < 0
+        || cartridge_snapshot_write_modules(p) < 0
         ) {
         return -1;
     }
@@ -418,7 +450,9 @@ int cbm2_snapshot_write_module(snapshot_t *p, int save_roms)
 int cbm2_snapshot_read_module(snapshot_t *p)
 {
     if (mem_read_ram_snapshot_module(p) < 0
-        || mem_read_rom_snapshot_module(p) < 0) {
+        || mem_read_rom_snapshot_module(p) < 0
+        || cartridge_snapshot_read_modules(p) < 0
+        ) {
         return -1;
     }
 

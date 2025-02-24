@@ -44,10 +44,10 @@
 /** \brief  Data for the radio buttons group
  */
 static const vice_gtk3_radiogroup_entry_t video_sizes[] = {
-    { "Auto (from ROM)", 0 },
-    { "40 Columns", 40 },
-    { "80 Columns", 80 },
-    { NULL, -1 }
+    { "Auto (from ROM)",  0 },
+    { "40 Columns",      40 },
+    { "80 Columns",      80 },
+    { NULL,              -1 }
 };
 
 
@@ -56,18 +56,17 @@ static const vice_gtk3_radiogroup_entry_t video_sizes[] = {
 static void (*user_callback)(int) = NULL;
 
 
-/** \brief  Handler for the "toggled" event of the radio buttons
+/** \brief  Handler for the 'toggled' event of the radio buttons
  *
  * Sets the VideoSize resource when it has been changed.
  *
- * \param[in]   widget      radio button triggering the event
- * \param[in]   new_val     value for the resource (`int`)
+ * \param[in]   widget  radio button triggering the event (unused)
+ * \param[in]   size    value for the resource (`int`)
  */
-static void on_video_size_toggled(GtkWidget *widget, int new_val)
+static void video_size_callback(GtkWidget *widget, int size)
 {
     if (user_callback != NULL) {
-        debug_gtk3("call user_callback with %d.", new_val);
-        user_callback(new_val);
+        user_callback(size);
     }
 }
 
@@ -82,28 +81,16 @@ GtkWidget *pet_video_size_widget_create(void)
 {
     GtkWidget *grid;
     GtkWidget *group;
-    GtkWidget *label;
 
-    grid = vice_gtk3_grid_new_spaced(VICE_GTK3_DEFAULT, VICE_GTK3_DEFAULT);
-    g_object_set(G_OBJECT(grid), "margin-left", 8, NULL);
-    label = gtk_label_new(NULL);
-    gtk_label_set_markup(GTK_LABEL(label), "<b>Display width</b>");
-    gtk_widget_set_halign(label, GTK_ALIGN_START);
-    gtk_grid_attach(GTK_GRID(grid), label, 0, 0, 1, 1);
+    grid = vice_gtk3_grid_new_spaced_with_label(8, 0, "Display width", 1);
+    vice_gtk3_grid_set_title_margin(grid, 8);
 
-    group = vice_gtk3_resource_radiogroup_new(
-            "VideoSize",
-            video_sizes,
-            GTK_ORIENTATION_VERTICAL);
-    /* TODO: should probably be 'set_callback` since I only support a single
-     *       callback, 'add' indicates it would be possible to add multiple
-     *       callbacks, which isn't possible (not yet anyway, and shouldn't
-     *       be required)
-     */
-    vice_gtk3_resource_radiogroup_add_callback(group, on_video_size_toggled);
-    g_object_set(G_OBJECT(group), "margin-left", 16, NULL);
+    group = vice_gtk3_resource_radiogroup_new("VideoSize",
+                                              video_sizes,
+                                              GTK_ORIENTATION_VERTICAL);
+    vice_gtk3_resource_radiogroup_add_callback(group, video_size_callback);
+    gtk_widget_set_margin_start(group, 8);
     gtk_grid_attach(GTK_GRID(grid), group, 0, 1, 1, 1);
-
 
     gtk_widget_show_all(grid);
     return grid;
@@ -112,11 +99,9 @@ GtkWidget *pet_video_size_widget_create(void)
 
 /** \brief  Set user-defined callback to be triggered when the widget changes
  *
- * \param[in]   widget  PET video size widget
  * \param[in]   func    user-defined callback
  */
-void pet_video_size_widget_set_callback(GtkWidget *widget,
-                                        void (*func)(int))
+void pet_video_size_widget_set_callback(void (*func)(int))
 {
     user_callback = func;
 }

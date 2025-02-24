@@ -95,10 +95,24 @@ read_func_ptr_t *_mem_read_tab_ptr;
 read_func_ptr_t *_mem_read_ind_tab_ptr;
 store_func_ptr_t *_mem_write_tab_ptr;
 store_func_ptr_t *_mem_write_ind_tab_ptr;
+read_func_ptr_t *_mem_read_tab_ptr_dummy;
+store_func_ptr_t *_mem_write_tab_ptr_dummy;
+read_func_ptr_t *_mem_read_ind_tab_ptr_dummy;
+store_func_ptr_t *_mem_write_ind_tab_ptr_dummy;
+
 static uint8_t **_mem_read_base_tab_ptr;
 static int *mem_read_limit_tab_ptr;
 
 int cbm2_init_ok = 0;
+
+/* Current watchpoint state.
+          0 = no watchpoints
+    bit0; 1 = watchpoints active
+    bit1; 2 = watchpoints trigger on dummy accesses
+*/
+static int watchpoints_active = 0;
+
+static void mem_update_tab_ptrs(int flag);
 
 /* ------------------------------------------------------------------------- */
 
@@ -126,8 +140,8 @@ void cbm2mem_set_bank_exec(int val)
     if (val != cbm2mem_bank_exec) {
         cbm2mem_bank_exec = val;
 
-        _mem_read_tab_ptr = _mem_read_tab[cbm2mem_bank_exec];
-        _mem_write_tab_ptr = _mem_write_tab[cbm2mem_bank_exec];
+        mem_update_tab_ptrs(watchpoints_active);
+
         _mem_read_base_tab_ptr = _mem_read_base_tab[cbm2mem_bank_exec];
         mem_read_limit_tab_ptr = mem_read_limit_tab[(cbm2mem_bank_exec < 15)
                                                     ? 0 : 1];
@@ -167,8 +181,9 @@ void cbm2mem_set_bank_ind(int val)
 
     if (val != cbm2mem_bank_ind) {
         cbm2mem_bank_ind = val;
-        _mem_read_ind_tab_ptr = _mem_read_tab[cbm2mem_bank_ind];
-        _mem_write_ind_tab_ptr = _mem_write_tab[cbm2mem_bank_ind];
+
+        mem_update_tab_ptrs(watchpoints_active);
+
         /* set all register mirror locations */
         for (i = 0; i < 16; i++) {
             mem_ram[(i << 16) + 1] = val;
@@ -403,6 +418,20 @@ static void store_watch(uint16_t addr, uint8_t value)
     _mem_write_tab[cbm2mem_bank_exec][addr >> 8](addr, value);
 }
 
+static uint8_t zero_read_ind_watch(uint16_t addr)
+{
+    addr &= 0xff;
+    monitor_watch_push_load_addr(addr, e_comp_space);
+    return _mem_read_tab[cbm2mem_bank_ind][0](addr);
+}
+
+static void zero_store_ind_watch(uint16_t addr, uint8_t value)
+{
+    addr &= 0xff;
+    monitor_watch_push_store_addr(addr, e_comp_space);
+    _mem_write_tab[cbm2mem_bank_ind][0](addr, value);
+}
+
 static uint8_t read_ind_watch(uint16_t addr)
 {
     monitor_watch_push_load_addr(addr, e_comp_space);
@@ -505,19 +534,44 @@ static uint8_t read_io(uint16_t addr)
     return last_access;
 }
 
+/* called by mem_toggle_watchpoints(), cbm2mem_set_bank_exec(), cbm2mem_set_bank_ind() */
+static void mem_update_tab_ptrs(int flag)
+{
+    if (flag) {
+        _mem_read_tab_ptr = _mem_read_tab_watch;
+        _mem_write_tab_ptr = _mem_write_tab_watch;
+        _mem_read_ind_tab_ptr = _mem_read_ind_tab_watch;
+        _mem_write_ind_tab_ptr = _mem_write_ind_tab_watch;
+        if (flag > 1) {
+            /* enable watchpoints on dummy accesses */
+            _mem_read_tab_ptr_dummy = _mem_read_tab_watch;
+            _mem_write_tab_ptr_dummy = _mem_write_tab_watch;
+            _mem_read_ind_tab_ptr_dummy = _mem_read_ind_tab_watch;
+            _mem_write_ind_tab_ptr_dummy = _mem_write_ind_tab_watch;
+        } else {
+            _mem_read_tab_ptr_dummy = _mem_read_tab[cbm2mem_bank_exec];
+            _mem_write_tab_ptr_dummy = _mem_write_tab[cbm2mem_bank_exec];
+            _mem_read_ind_tab_ptr_dummy = _mem_read_tab[cbm2mem_bank_ind];
+            _mem_write_ind_tab_ptr_dummy = _mem_write_tab[cbm2mem_bank_ind];
+        }
+    } else {
+        /* all watchpoints disabled */
+        _mem_read_tab_ptr = _mem_read_tab[cbm2mem_bank_exec];
+        _mem_write_tab_ptr = _mem_write_tab[cbm2mem_bank_exec];
+        _mem_read_tab_ptr_dummy = _mem_read_tab[cbm2mem_bank_exec];
+        _mem_write_tab_ptr_dummy = _mem_write_tab[cbm2mem_bank_exec];
+        _mem_read_ind_tab_ptr = _mem_read_tab[cbm2mem_bank_ind];
+        _mem_write_ind_tab_ptr = _mem_write_tab[cbm2mem_bank_ind];
+        _mem_read_ind_tab_ptr_dummy = _mem_read_tab[cbm2mem_bank_ind];
+        _mem_write_ind_tab_ptr_dummy = _mem_write_tab[cbm2mem_bank_ind];
+    }
+}
 
 /* FIXME: TODO! */
 void mem_toggle_watchpoints(int flag, void *context)
 {
-    if (flag) {
-        _mem_read_tab_ptr = _mem_read_tab_watch;
-        _mem_read_ind_tab_ptr = _mem_read_ind_tab_watch;
-        _mem_write_tab_ptr = _mem_write_tab_watch;
-        _mem_write_ind_tab_ptr = _mem_write_ind_tab_watch;
-    } else {
-        cbm2mem_set_bank_exec(cbm2mem_bank_exec);
-        cbm2mem_set_bank_ind(cbm2mem_bank_ind);
-    }
+    mem_update_tab_ptrs(flag);
+    watchpoints_active = flag;
 }
 
 /* ------------------------------------------------------------------------- */
@@ -588,9 +642,10 @@ void mem_initialize_memory(void)
         _mem_write_tab_watch[i] = store_watch;
         _mem_write_ind_tab_watch[i] = store_ind_watch;
     }
-    /* FIXME: what about _ind_tab_watch ? */
     _mem_read_tab_watch[0] = zero_read_watch;
     _mem_write_tab_watch[0] = zero_store_watch;
+    _mem_read_ind_tab_watch[0] = zero_read_ind_watch;
+    _mem_write_ind_tab_watch[0] = zero_store_ind_watch;
 }
 
 void mem_initialize_memory_bank(int i)
@@ -787,6 +842,8 @@ void mem_powerup(void)
 
     ram_init(mem_ram, CBM2_RAM_SIZE);
 
+    /* FIXME: this appears to be some odd hack to simulate "no ROM".
+              also see similar thing in mem_load() */
     for (i = 0; i < 0x800; i += 0x80) {
         memset(mem_rom + i, 0, 0x40);
         memset(mem_rom + i + 0x40, 0xff, 0x40);
@@ -804,24 +861,52 @@ void mem_powerup(void)
 
 /* ------------------------------------------------------------------------- */
 
-/* FIXME: To do!  */
-
 void mem_get_basic_text(uint16_t *start, uint16_t *end)
 {
+    if (start != NULL) {
+        *start = mem_page_zero[0x2d] | (mem_page_zero[0x2e] << 8);
+    }
+    if (end != NULL) {
+        *end = mem_page_zero[0x2f] | (mem_page_zero[0x30] << 8);
+    }
 }
 
+/* FIXME: This is likely incomplete!  */
 void mem_set_basic_text(uint16_t start, uint16_t end)
 {
+    mem_page_zero[0x2d] = start & 0xff;
+    mem_page_zero[0x2e] = start >> 8;
+    mem_page_zero[0x2f] = end & 0xff;
+    mem_page_zero[0x30] = end >> 8;
+}
+
+/* this function should always read from the screen currently used by the kernal
+   for output, normally this does just return system ram - except when the
+   videoram is not memory mapped.
+   used by autostart to "read" the kernal messages
+*/
+uint8_t mem_read_screen(uint16_t addr)
+{
+    return mem_read(addr);
 }
 
 void mem_inject(uint32_t addr, uint8_t value)
 {
-    /* just call mem_store() to be safe.
-       This could possibly be changed to write straight into the
-       memory array.  mem_ram[addr & mask] = value; */
-    mem_store((uint16_t)(addr & 0xffff), value);
+    /* since this is used by autostart, this should point to basic memory */
+    /* FIXME: handle > 64kb */
+    mem_ram[0x10000 + (addr & 0xffff)] = value;
 }
-
+/* In banked memory architectures this will always write to the bank that
+   contains the keyboard buffer and "number of keys in buffer", regardless of
+   what the CPU "sees" currently.
+   In all other cases this just writes to the first 64kb block, usually by
+   wrapping to mem_inject().
+*/
+void mem_inject_key(uint16_t addr, uint8_t value)
+{
+    /* write to "romio" bank */
+    mem_bank_write(16, addr, value, NULL);
+}
 /* ------------------------------------------------------------------------- */
 
 int mem_rom_trap_allowed(uint16_t addr)
@@ -870,21 +955,54 @@ static uint8_t peek_bank_io(uint16_t addr)
 
 /* Exported banked memory access functions for the monitor.  */
 
-static const char *banknames[] = {
-    "default", "cpu", "ram0", "ram1", "ram2", "ram3",
-    "ram4", "ram5", "ram6", "ram7", "ram8", "ram9",
-    "ramA", "ramB", "ramC", "ramD", "ramE", "ramF",
-    "romio", "io", NULL
+#define BANK_RAM_00     0x00    /* Only RAM */
+#define BANK_RAM_0F     0x0F    /* Only RAM */
+#define BANK_ROMIO      16      /* Like bank 15 but with ROM and I/O in place */
+#define BANK_CPU        17      /* What the CPU sees in its exec bank */
+
+#define MAXBANKS (2 + 16 + 2)
+
+static const char *banknames[MAXBANKS + 1] = {
+    "default", "cpu",
+    /* by convention, a "bank array" has a 2-hex-digit bank index appended */
+    "ram00", "ram01", "ram02", "ram03", "ram04", "ram05", "ram06", "ram07",
+    "ram08", "ram09", "ram0a", "ram0b", "ram0c", "ram0d", "ram0e", "ram0f",
+    "romio", "io",
+    NULL
 };
 
-static const int banknums[] = {
-    17, 17, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 16 };
+static const int banknums[MAXBANKS + 1] = {
+    BANK_CPU, BANK_CPU,
+    0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
+    BANK_ROMIO, BANK_ROMIO,
+    -1
+};
+
+static const int bankindex[MAXBANKS + 1] = {
+    -1, -1,
+    0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
+    -1, -1,
+    -1
+};
+
+static const int bankflags[MAXBANKS + 1] = {
+    0, 0,
+    MEM_BANK_ISARRAY | MEM_BANK_ISARRAYFIRST, MEM_BANK_ISARRAY, MEM_BANK_ISARRAY, MEM_BANK_ISARRAY, MEM_BANK_ISARRAY, MEM_BANK_ISARRAY, MEM_BANK_ISARRAY, MEM_BANK_ISARRAY,
+    MEM_BANK_ISARRAY, MEM_BANK_ISARRAY, MEM_BANK_ISARRAY, MEM_BANK_ISARRAY, MEM_BANK_ISARRAY, MEM_BANK_ISARRAY, MEM_BANK_ISARRAY, MEM_BANK_ISARRAY | MEM_BANK_ISARRAYLAST,
+    0, 0,
+    -1
+};
 
 const char **mem_bank_list(void)
 {
     return banknames;
 }
 
+const int *mem_bank_list_nos(void) {
+    return banknums;
+}
+
+/* return bank number for a given literal bank name */
 int mem_bank_from_name(const char *name)
 {
     int i = 0;
@@ -898,42 +1016,83 @@ int mem_bank_from_name(const char *name)
     return -1;
 }
 
+/* return current index for a given bank */
+int mem_bank_index_from_bank(int bank)
+{
+    int i = 0;
+
+    while (banknums[i] > -1) {
+        if (banknums[i] == bank) {
+            return bankindex[i];
+        }
+        i++;
+    }
+    return -1;
+}
+
+int mem_bank_flags_from_bank(int bank)
+{
+    int i = 0;
+
+    while (banknums[i] > -1) {
+        if (banknums[i] == bank) {
+            return bankflags[i];
+        }
+        i++;
+    }
+    return -1;
+}
+
 uint8_t mem_bank_read(int bank, uint16_t addr, void *context)
 {
     switch (bank) {
-        case 17:                /* current */
+        case BANK_CPU:                /* current */
             return mem_read(addr);
-        case 16:                 /* romio */
-            if (addr >= 0xd000 && addr < 0xe000) {
+        case BANK_ROMIO:              /* romio */
+            if (addr >= 0xD000 && addr < 0xE000) {
                 return read_io(addr);
             }
             return _mem_read_tab[15][addr >> 8](addr);
         default:
-            if (bank >= 0 && bank < 15) {
+            if (bank >= BANK_RAM_00 && bank <= BANK_RAM_0F) {
                 return read_ram_tab[bank](addr);
             }
     }
     return read_unused(addr);
 }
 
+/* used by monitor if sfx off */
 uint8_t mem_bank_peek(int bank, uint16_t addr, void *context)
 {
-    if (bank == 16) {
-        if (addr >= 0xc000 && addr < 0xe000) {
+    if (bank == BANK_ROMIO ||
+        (bank == BANK_CPU && cbm2mem_bank_exec == BANK_RAM_0F) ) {
+        if (addr >= 0xD000 && addr < 0xE000) {
             return peek_bank_io(addr);
         }
     }
+    /* For other cases we access only RAM or banking registers,
+     * so there are no side effects; just fall back to read. */
     return mem_bank_read(bank, addr, context);
+}
+
+int mem_get_current_bank_config(void) {
+    return cbm2mem_bank_exec == BANK_RAM_0F ? BANK_ROMIO
+                                            : cbm2mem_bank_exec;
+    /* return BANK_CPU; could be another option */
+}
+
+uint8_t mem_peek_with_config(int config, uint16_t addr, void *context) {
+    return mem_bank_peek(config, addr, context);
 }
 
 void mem_bank_write(int bank, uint16_t addr, uint8_t byte, void *context)
 {
     switch (bank) {
-        case 17:                 /* current */
+        case BANK_CPU:                 /* current */
             mem_store(addr, byte);
             return;
-        case 16:
-            if (addr >= 0xd000 && addr <= 0xdfff) {
+        case BANK_ROMIO:
+            if (addr >= 0xD000 && addr <= 0xDFFF) {
                 store_io(addr, byte);
                 return;
             }
@@ -952,6 +1111,12 @@ void mem_bank_write(int bank, uint16_t addr, uint8_t byte, void *context)
     store_dummy(addr, byte);
 }
 
+/* used by monitor if sfx off */
+void mem_bank_poke(int bank, uint16_t addr, uint8_t byte, void *context)
+{
+    mem_bank_write(bank, addr, byte, context);
+}
+
 mem_ioreg_list_t *mem_ioreg_list_get(void *context)
 {
     mem_ioreg_list_t *mem_ioreg_list = NULL;
@@ -964,9 +1129,24 @@ mem_ioreg_list_t *mem_ioreg_list_get(void *context)
 void mem_get_screen_parameter(uint16_t *base, uint8_t *rows, uint8_t *columns, int *bank)
 {
     *base = 0xd000;
-    *rows = 25;
-    *columns = 80;
-    *bank = 16;
+    *bank = BANK_ROMIO;
+    *columns = crtc_peek_register(CRTC_REG_HDISP);
+    *rows = crtc_peek_register(CRTC_REG_VDISP);
+}
+
+/* used by autostart to locate and "read" kernal output on the current screen
+ * this function should return whatever the kernal currently uses, regardless
+ * what is currently visible/active in the UI
+ */
+void mem_get_cursor_parameter(uint16_t *screen_addr, uint8_t *cursor_column, uint8_t *line_length, int *blinking)
+{
+    *screen_addr = zero_read(0xc8) + zero_read(0xc9) * 256; /* Current Screen Line Address */
+    *cursor_column = zero_read(0xcb);    /* Cursor Column on Current Line */
+
+    *line_length = crtc_peek_register(CRTC_REG_HDISP); /* Physical Screen Line Length */
+    /* Cursor Blink enable: 1 = Flash Cursor, 0 = Cursor disabled, -1 = n/a */
+    *blinking = (crtc_peek_register(CRTC_REG_CURSORSTART) != 1);
+    /* printf("mem_get_cursor_parameter %04x %d %d %d\n", *screen_addr, *cursor_column, *line_length, *blinking); */
 }
 
 /* ------------------------------------------------------------------------- */
@@ -989,93 +1169,105 @@ static int tpi2_dump(void)
 /* ------------------------------------------------------------------------- */
 
 static io_source_t crtc_device = {
-    "CRTC",
-    IO_DETACH_CART, /* dummy */
-    NULL,           /* dummy */
-    0xd800, 0xd8ff, 1,
-    1, /* read is always valid */
-    crtc_store,
-    crtc_read,
-    crtc_peek,
-    crtc_dump,
-    0, /* dummy (not a cartridge) */
-    IO_PRIO_HIGH, /* priority, device and mirrors never involved in collisions */
-    0
+    "CRTC",                /* name of the chip */
+    IO_DETACH_NEVER,       /* chip is never involved in collisions, so no detach */
+    IO_DETACH_NO_RESOURCE, /* does not use a resource for detach */
+    0xd800, 0xd8ff, 0x01,  /* range for the chip, regs:$d800-$d801, mirrors: $d802-$d8ff */
+    1,                     /* read is always valid */
+    crtc_store,            /* store function */
+    NULL,                  /* NO poke function */
+    crtc_read,             /* read function */
+    crtc_peek,             /* peek function */
+    crtc_dump,             /* chip state information dump function */
+    IO_CART_ID_NONE,       /* not a cartridge */
+    IO_PRIO_HIGH,          /* high priority, chip never involved in collisions */
+    0,                     /* insertion order, gets filled in by the registration function */
+    IO_MIRROR_NONE         /* NO mirroring */
 };
 
 static io_source_t sid_device = {
-    "SID",
-    IO_DETACH_CART, /* dummy */
-    NULL,           /* dummy */
-    0xda00, 0xdaff, 0x1f,
-    1, /* read is always valid */
-    sid_store,
-    sid_read,
-    sid_peek,
-    sid_dump,
-    0, /* dummy (not a cartridge) */
-    IO_PRIO_HIGH, /* priority, device and mirrors never involved in collisions */
-    0
+    "SID",                 /* name of the chip */
+    IO_DETACH_NEVER,       /* chip is never involved in collisions, so no detach */
+    IO_DETACH_NO_RESOURCE, /* does not use a resource for detach */
+    0xda00, 0xdaff, 0x1f,  /* range for the chip, regs:$da00-$da1f, mirrors:$da20-$daff */
+    1,                     /* read is always valid */
+    sid_store,             /* store function */
+    NULL,                  /* NO poke function */
+    sid_read,              /* read function */
+    sid_peek,              /* peek function */
+    sid_dump,              /* chip state information dump function */
+    IO_CART_ID_NONE,       /* not a cartridge */
+    IO_PRIO_HIGH,          /* high priority, chip never involved in collisions */
+    0,                     /* insertion order, gets filled in by the registration function */
+    IO_MIRROR_NONE         /* NO mirroring */
 };
 
 static io_source_t cia_device = {
-    "CIA",
-    IO_DETACH_CART, /* dummy */
-    NULL,           /* dummy */
-    0xdc00, 0xdcff, 0xf,
-    1, /* read is always valid */
-    cia1_store,
-    cia1_read,
-    cia1_peek,
-    cia1_dump,
-    0, /* dummy (not a cartridge) */
-    IO_PRIO_HIGH, /* priority, device and mirrors never involved in collisions */
-    0
+    "CIA",                 /* name of the chip */
+    IO_DETACH_NEVER,       /* chip is never involved in collisions, so no detach */
+    IO_DETACH_NO_RESOURCE, /* does not use a resource for detach */
+    0xdc00, 0xdcff, 0x0f,  /* range for the chip, regs:$dc00-$dc0f, mirrors:$dc10-$dcff */
+    1,                     /* read is always valid */
+    cia1_store,            /* store function */
+    NULL,                  /* NO poke function */
+    cia1_read,             /* read function */
+    cia1_peek,             /* peek function */
+    cia1_dump,             /* chip state information dump function */
+    IO_CART_ID_NONE,       /* not a cartridge */
+    IO_PRIO_HIGH,          /* high priority, chip never involved in collisions */
+    0,                     /* insertion order, gets filled in by the registration function */
+    IO_MIRROR_NONE         /* NO mirroring */
 };
 
 static io_source_t acia_device = {
-    "ACIA",
-    IO_DETACH_CART, /* dummy */
-    NULL,           /* dummy */
-    0xdd00, 0xddff, 3,
-    1, /* read is always valid */
-    acia1_store,
-    acia1_read,
-    acia1_peek,
-    NULL, /* TODO: dump */
-    0, /* dummy (not a cartridge) */
-    IO_PRIO_HIGH, /* priority, device and mirrors never involved in collisions */
-    0
+    "ACIA",                /* name of the chip */
+    IO_DETACH_NEVER,       /* chip is never involved in collisions, so no detach */
+    IO_DETACH_NO_RESOURCE, /* does not use a resource for detach */
+    0xdd00, 0xddff, 0x03,  /* range for the chip, regs:$dd00-$dd03, mirrors:$dd04-$ddff */
+    1,                     /* read is always valid */
+    acia1_store,           /* store function */
+    NULL,                  /* NO poke function */
+    acia1_read,            /* read function */
+    acia1_peek,            /* peek function */
+    acia1_dump,            /* chip state information dump function */
+    IO_CART_ID_NONE,       /* not a cartridge */
+    IO_PRIO_HIGH,          /* high priority, chip never involved in collisions */
+    0,                     /* insertion order, gets filled in by the registration function */
+    IO_MIRROR_NONE         /* NO mirroring */
 };
 
 static io_source_t tpi1_device = {
-    "TPI1",
-    IO_DETACH_CART, /* dummy */
-    NULL,           /* dummy */
-    0xde00, 0xdeff, 7,
-    1, /* read is always valid */
-    tpi1_store,
-    tpi1_read,
-    tpi1_peek,
-    tpi1_dump,
-    0, /* dummy (not a cartridge) */
-    IO_PRIO_HIGH, /* priority, device and mirrors never involved in collisions */
-    0
+    "TPI1",                /* name of the chip */
+    IO_DETACH_NEVER,       /* chip is never involved in collisions, so no detach */
+    IO_DETACH_NO_RESOURCE, /* does not use a resource for detach */
+    0xde00, 0xdeff, 0x07,  /* range for the chip, regs:$de00-$de07, mirrors:$de08-$deff */
+    1,                     /* read is always valid */
+    tpi1_store,            /* store function */
+    NULL,                  /* NO poke function */
+    tpi1_read,             /* read function */
+    tpi1_peek,             /* peek function */
+    tpi1_dump,             /* chip state information dump function */
+    IO_CART_ID_NONE,       /* not a cartridge */
+    IO_PRIO_HIGH,          /* high priority, chip never involved in collisions */
+    0,                     /* insertion order, gets filled in by the registration function */
+    IO_MIRROR_NONE         /* NO mirroring */
 };
 
 static io_source_t tpi2_device = {
-    "TPI2",
-    IO_DETACH_CART, /* dummy */
-    NULL,           /* dummy */
-    0xdf00, 0xdfff, 7,
-    1, /* read is always valid */
-    tpi2_store,
-    tpi2_read,
-    tpi2_peek,
-    tpi2_dump,
-    0, /* dummy (not a cartridge) */
-    IO_PRIO_HIGH, /* priority, device and mirrors never involved in collisions */
-    0
+    "TPI2",                /* name of the chip */
+    IO_DETACH_NEVER,       /* chip is never involved in collisions, so no detach */
+    IO_DETACH_NO_RESOURCE, /* does not use a resource for detach */
+    0xdf00, 0xdfff, 0x07,  /* range for the chip, regs:$df00-$df07, mirrors:$df08-$dfff */
+    1,                     /* read is always valid */
+    tpi2_store,            /* store function */
+    NULL,                  /* NO poke function */
+    tpi2_read,             /* read function */
+    tpi2_peek,             /* peek function */
+    tpi2_dump,             /* chip state information dump function */
+    IO_CART_ID_NONE,       /* not a cartridge */
+    IO_PRIO_HIGH,          /* high priority, chip never involved in collisions */
+    0,                     /* insertion order, gets filled in by the registration function */
+    IO_MIRROR_NONE         /* NO mirroring */
 };
 
 static io_source_list_t *crtc_list_item = NULL;
@@ -1095,3 +1287,4 @@ void cbm2io_init(void)
     tpi1_list_item = io_source_register(&tpi1_device);
     tpi2_list_item = io_source_register(&tpi2_device);
 }
+

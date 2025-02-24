@@ -33,10 +33,10 @@
 #include "vice.h"
 #include <gtk/gtk.h>
 
-#include "resources.h"
+#include "gfxoutput.h"
 #include "vice-event.h"
 #include "vice_gtk3.h"
-#include "debug_gtk3.h"
+#include "uimedia.h"
 
 #include "settings_snapshot.h"
 
@@ -52,79 +52,63 @@ static const vice_gtk3_radiogroup_entry_t recstart_modes[] = {
 };
 
 
-/** \brief  Reference to the 'history directory' entry box
- */
-static GtkWidget *histdir_entry;
-
-
-/** \brief  Handler for the "clicked" event of the "browse" button
- *
- * \param[in]   widget      widget triggering the event
- * \param[in]   user_data   extra event data (unused)
- */
-static void on_histdir_browse_clicked(GtkWidget *widget, gpointer user_data)
-{
-    char *filename;
-    const char *current;
-
-    if (resources_get_string("EventSnapshotDir", &current) < 0) {
-        debug_gtk3("failed to get current history directory, using NULL.");
-        current = NULL;
-    }
-
-    filename = vice_gtk3_select_directory_dialog(
-            "Select history directory", NULL, TRUE, current);
-    if (filename != NULL) {
-        debug_gtk3("Setting EventSnapshotDir to '%s'.", filename);
-        vice_gtk3_resource_entry_full_set(histdir_entry, filename);
-        g_free(filename);
-    }
-}
-
-
 /** \brief  Create settings widget for snapshot/event recording
  *
  * \param[in]   parent  parent widget
  *
  * \return  GtkGrid
+ *
+ * \todo    Use resourcebrowser to control "EventSnapshotDir" resource
  */
 GtkWidget *settings_snapshot_widget_create(GtkWidget *parent)
 {
     GtkWidget *grid;
-
     GtkWidget *label;
-    GtkWidget *histdir_browse;
-    GtkWidget *recmode_widget;
+    GtkWidget *histdir;
+    GtkWidget *recmode;
+    GtkWidget *quickformat;
+    gfxoutputdrv_t *driver;
 
     grid = gtk_grid_new();
-    gtk_grid_set_column_spacing(GTK_GRID(grid), 16);
+    gtk_grid_set_column_spacing(GTK_GRID(grid), 8);
     gtk_grid_set_row_spacing(GTK_GRID(grid), 8);
 
-    label = gtk_label_new("History directory");
+    label = gtk_label_new("History/snapshot directory");
     gtk_widget_set_halign(label, GTK_ALIGN_START);
-    g_object_set(label, "margin-left", 16, NULL);
-
-    histdir_entry = vice_gtk3_resource_entry_full_new("EventSnapshotDir");
-    gtk_widget_set_hexpand(histdir_entry, TRUE);
-
-    histdir_browse = gtk_button_new_with_label("Browse ...");
-    g_signal_connect(histdir_browse, "clicked",
-            G_CALLBACK(on_histdir_browse_clicked), NULL);
-
-    gtk_grid_attach(GTK_GRID(grid), label, 0, 0, 1, 1);
-    gtk_grid_attach(GTK_GRID(grid), histdir_entry, 1, 0, 1, 1);
-    gtk_grid_attach(GTK_GRID(grid), histdir_browse, 2, 0, 1, 1);
+    histdir = vice_gtk3_resource_filechooser_new("EventSnapshotDir",
+                                                 GTK_FILE_CHOOSER_ACTION_SELECT_FOLDER);
+    vice_gtk3_resource_filechooser_set_custom_title(histdir,
+                                                    "Select history/snapshot directory");
+    gtk_grid_attach(GTK_GRID(grid), label,   0, 0, 1, 1);
+    gtk_grid_attach(GTK_GRID(grid), histdir, 1, 0, 1, 1);
 
     label = gtk_label_new("Recording start mode");
     gtk_widget_set_halign(label, GTK_ALIGN_START);
     gtk_widget_set_valign(label, GTK_ALIGN_START);
-    g_object_set(label, "margin-left", 16, NULL);
+    recmode = vice_gtk3_resource_radiogroup_new("EventStartMode",
+                                                recstart_modes,
+                                                GTK_ORIENTATION_VERTICAL);
 
-    recmode_widget = vice_gtk3_resource_radiogroup_new("EventStartMode",
-            recstart_modes, GTK_ORIENTATION_VERTICAL);
+    gtk_grid_attach(GTK_GRID(grid), label,   0, 1, 1, 1);
+    gtk_grid_attach(GTK_GRID(grid), recmode, 1, 1, 2, 1);
 
-    gtk_grid_attach(GTK_GRID(grid), label, 0, 1, 1, 1);
-    gtk_grid_attach(GTK_GRID(grid), recmode_widget, 1, 1, 2, 1);
+
+    label = gtk_label_new("Quicksave screenshot format");
+    gtk_widget_set_halign(label, GTK_ALIGN_START);
+    gtk_widget_set_valign(label, GTK_ALIGN_START);
+    quickformat = vice_gtk3_resource_combo_str_new("QuicksaveScreenshotFormat", NULL);
+
+    driver = gfxoutput_drivers_iter_init();
+    while (driver != NULL) {
+        if (driver->type == GFXOUTPUTDRV_TYPE_SCREENSHOT_NATIVE ||
+            driver->type == GFXOUTPUTDRV_TYPE_SCREENSHOT_IMAGE) {
+            vice_gtk3_resource_combo_str_append(quickformat, driver->name, driver->displayname);
+        }
+        driver = gfxoutput_drivers_iter_next();
+    }
+    vice_gtk3_resource_combo_str_sync(quickformat);
+    gtk_grid_attach(GTK_GRID(grid), label,       0, 2, 1, 1);
+    gtk_grid_attach(GTK_GRID(grid), quickformat, 1, 2, 2, 1);
 
     gtk_widget_show_all(grid);
     return grid;

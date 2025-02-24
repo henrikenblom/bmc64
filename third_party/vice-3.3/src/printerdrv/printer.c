@@ -34,14 +34,24 @@
 #include "drv-raw.h"
 #include "interface-serial.h"
 #include "interface-userport.h"
+#include "log.h"
 #include "machine-printer.h"
 #include "output-graphics.h"
 #include "output-select.h"
 #include "output-text.h"
 #include "printer.h"
 
+/* #define DEBUG_PRINTER */
+
+#ifdef DEBUG_PRINTER
+#define DBG(x) log_printf  x
+#else
+#define DBG(x)
+#endif
+
 int printer_resources_init(void)
 {
+    DBG(("printer_resources_init"));
     if (output_graphics_init_resources() < 0
         || output_text_init_resources() < 0
         || output_select_init_resources() < 0
@@ -59,10 +69,13 @@ int printer_resources_init(void)
 
 int printer_userport_resources_init(void)
 {
-    if (driver_select_userport_init_resources() < 0
-        || output_select_userport_init_resources() < 0) {
+    DBG(("printer_userport_resources_init"));
+    if (output_select_userport_init_resources() < 0
+        || driver_select_userport_init_resources() < 0) {
+        DBG(("printer_userport_resources_init (failed)"));
         return -1;
     }
+    DBG(("printer_userport_resources_init (ok)"));
     return 0;
 }
 
@@ -73,6 +86,7 @@ void printer_resources_shutdown(void)
 
 int printer_cmdline_options_init(void)
 {
+    DBG(("printer_cmdline_options_init"));
     if (output_text_init_cmdline_options() < 0
         || output_select_init_cmdline_options() < 0
         || driver_select_init_cmdline_options() < 0
@@ -84,6 +98,7 @@ int printer_cmdline_options_init(void)
 
 int printer_userport_cmdline_options_init(void)
 {
+    DBG(("printer_userport_cmdline_options_init"));
     if (driver_select_userport_init_cmdline_options() < 0
         || output_select_userport_init_cmdline_options() < 0) {
         return -1;
@@ -110,16 +125,34 @@ void printer_reset(void)
 
 void printer_shutdown(void)
 {
-    output_graphics_shutdown();
-    output_select_shutdown();
+    int n;
+    driver_select_shutdown();
+    /*
+     * This shuts down the serial port, which may close some lingering
+     * secondary addresses on the printers, which may produce some final
+     * (graphics) output.
+     */
+    machine_printer_shutdown();
+    /* send a formfeed to all drivers */
+    for (n = 0; n < NUM_OUTPUT_SELECT; n++) {
+        driver_select_formfeed(n);
+    }
+    /*
+     * So really shutting them down should be done after that.
+     */
     drv_mps803_shutdown();
     drv_nl10_shutdown();
     drv_1520_shutdown();
-    driver_select_shutdown();
-    machine_printer_shutdown();
+    output_graphics_shutdown();
+    output_select_shutdown();
 }
 
+/** \brief  Send formfeed to printer
+ *
+ * \param[in]   prnr    device index (0-2: 4-6, 3: userport)
+ */
 void printer_formfeed(unsigned int prnr)
 {
+    DBG(("printer_formfeed:%u", prnr));
     driver_select_formfeed(prnr);
 }

@@ -31,10 +31,10 @@
 #include <string.h>
 
 #include "archdep.h"
+#include "charset.h"
 #include "diskcontents.h"
 #include "tapecontents.h"
 #include "imagecontents.h"
-#include "ioutil.h"
 #include "lib.h"
 #include "ui.h"
 #include "uimenu.h"
@@ -48,6 +48,20 @@
 
 static menu_draw_t *menu_draw;
 
+/* in the actual charset, the places that would cover the alternative petscii
+   positions are used by something else, so replace them by the regular codes.
+   FIXME: this seems a bit ugly, perhaps a separate print function for petscii
+   can be made, which deals with this internally.
+*/
+static void petscii_replace_alternatives(unsigned char *b) {
+    while (*b) {
+        if ((*b >= 0xc0) && (*b <= 0xdf)) {
+            *b = (*b - 0xc0) + 0x60;
+        };
+        b++;
+    }
+}
+
 static void sdl_ui_image_file_selector_redraw(image_contents_t *contents, const char *title, int offset, int num_items, int more, ui_menu_filereq_mode_t mode, int cur_offset)
 {
     int i, j;
@@ -56,8 +70,8 @@ static void sdl_ui_image_file_selector_redraw(image_contents_t *contents, const 
     uint8_t oldbg;
     image_contents_file_list_t *entry;
 
-    title_string = image_contents_to_string(contents, 0);
-    
+    title_string = image_contents_to_string(contents, IMAGE_CONTENTS_STRING_PETSCII);
+
     sdl_ui_clear();
     sdl_ui_display_title(title_string);
     lib_free(title_string);
@@ -73,6 +87,7 @@ static void sdl_ui_image_file_selector_redraw(image_contents_t *contents, const 
 
         j = MENU_FIRST_X;
         name = image_contents_file_to_string(entry, IMAGE_CONTENTS_STRING_PETSCII);
+        petscii_replace_alternatives((unsigned char *)name);
         j += sdl_ui_print(name, j, i + IMAGE_FIRST_Y + SDL_FILEREQ_META_NUM);
 
         if (i == cur_offset) {
@@ -104,6 +119,7 @@ static void sdl_ui_image_file_selector_redraw_cursor(image_contents_t *contents,
             }
             j = MENU_FIRST_X;
             name = image_contents_file_to_string(entry, IMAGE_CONTENTS_STRING_PETSCII);
+            petscii_replace_alternatives((unsigned char *)name);
             j += sdl_ui_print(name, j, i + IMAGE_FIRST_Y + SDL_FILEREQ_META_NUM);
 
             sdl_ui_print_eol(j, i + IMAGE_FIRST_Y + SDL_FILEREQ_META_NUM);
@@ -132,10 +148,9 @@ int sdl_ui_image_file_selection_dialog(const char* filename, ui_menu_filereq_mod
 
     menu_draw = sdl_ui_get_menu_param();
 
-    /* FIXME: it might be a good idea to wrap this into a common imagecontents_read */
     contents = tapecontents_read(filename);
     if (contents == NULL) {
-        contents = diskcontents_read(filename, 0);
+        contents = diskcontents_filesystem_read(filename);
         if (contents == NULL) {
             return 0;
         }
@@ -156,13 +171,13 @@ int sdl_ui_image_file_selection_dialog(const char* filename, ui_menu_filereq_mod
         sdl_ui_set_active_font(MENU_FONT_IMAGES);
 
         if (redraw) {
-            sdl_ui_image_file_selector_redraw(contents, filename, offset, 
-                (total - offset > menu_max) ? menu_max : total - offset, 
+            sdl_ui_image_file_selector_redraw(contents, filename, offset,
+                (total - offset > menu_max) ? menu_max : total - offset,
                 (total - offset > menu_max) ? 1 : 0, mode, cur);
             redraw = 0;
         } else {
-            sdl_ui_image_file_selector_redraw_cursor(contents, offset, 
-                    (total - offset > menu_max) ? menu_max : total - offset, 
+            sdl_ui_image_file_selector_redraw_cursor(contents, offset,
+                    (total - offset > menu_max) ? menu_max : total - offset,
                     mode, cur, cur_old);
         }
 
@@ -256,6 +271,6 @@ int sdl_ui_image_file_selection_dialog(const char* filename, ui_menu_filereq_mod
                 break;
         }
     }
-
+    lib_free(contents);
     return retval;
 }

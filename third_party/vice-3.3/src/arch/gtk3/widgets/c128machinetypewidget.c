@@ -30,16 +30,14 @@
  */
 
 #include "vice.h"
-
 #include <gtk/gtk.h>
 
-#include "basewidgets.h"
-#include "widgethelpers.h"
-#include "debug_gtk3.h"
-#include "resources.h"
 #include "c128.h"
+#include "resources.h"
+#include "vice_gtk3.h"
 
 #include "c128machinetypewidget.h"
+
 
 /** \brief  List of C128 machine types
  */
@@ -53,7 +51,7 @@ static const vice_gtk3_radiogroup_entry_t machine_types[] = {
     { "Norwegian",      C128_MACHINE_NORWEGIAN },
     { "Swedish",        C128_MACHINE_SWEDISH },
     { "Swiss",          C128_MACHINE_SWISS },
-    { NULL, -1 }
+    { NULL,             -1 }
 };
 
 
@@ -61,16 +59,25 @@ static const vice_gtk3_radiogroup_entry_t machine_types[] = {
  *
  * \return  GtkGrid
  */
-GtkWidget * c128_machine_type_widget_create(void)
+GtkWidget *c128_machine_type_widget_create(void)
 {
     GtkWidget *grid;
-    GtkWidget *radio_group;
+    GtkWidget *label;
+    GtkWidget *group;
 
-    grid = uihelpers_create_grid_with_label("Machine type", 1);
-    radio_group = vice_gtk3_resource_radiogroup_new(
-            "MachineType", machine_types, GTK_ORIENTATION_VERTICAL);
-    g_object_set(radio_group, "margin-left", 16, NULL);
-    gtk_grid_attach(GTK_GRID(grid), radio_group, 0, 1, 1, 1);
+    grid = gtk_grid_new();
+    gtk_grid_set_row_spacing(GTK_GRID(grid), 8);
+
+    label = gtk_label_new(NULL);
+    gtk_label_set_markup(GTK_LABEL(label), "<b>Machine type</b>");
+    gtk_widget_set_halign(label, GTK_ALIGN_START);
+
+    group = vice_gtk3_resource_radiogroup_new("MachineType",
+                                              machine_types,
+                                              GTK_ORIENTATION_VERTICAL);
+
+    gtk_grid_attach(GTK_GRID(grid), label, 0, 0, 1, 1);
+    gtk_grid_attach(GTK_GRID(grid), group, 0, 1, 1, 1);
     gtk_widget_show_all(grid);
     return grid;
 }

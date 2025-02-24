@@ -31,8 +31,8 @@
 /* #define MC6821_DEBUG */
 
 #ifdef MC6821_DEBUG
-#include <stdio.h>
-#define DBG(x)  printf x
+#include <log.h>
+#define DBG(x)  log_printf x
 #else
 #define DBG(x)
 #endif
@@ -41,6 +41,7 @@
 
 #include "mc6821core.h"
 #include "snapshot.h"
+#include "monitor.h"
 
 void mc6821core_reset(mc6821_state *ctx)
 {
@@ -86,7 +87,6 @@ uint8_t mc6821core_read(mc6821_state *ctx, int port /* rs1 */, int reg /* rs0 */
                 /* data port */
                 data = ctx->dataA & ctx->ddrA;
 
-                /* FIXME: CA2 output mode 0x08 */
                 if (ctx->CA2state == 1) {
                     ctx->CA2 = 0;
                     if (ctx->set_ca2) {
@@ -101,13 +101,11 @@ uint8_t mc6821core_read(mc6821_state *ctx, int port /* rs1 */, int reg /* rs0 */
                     data |= 0xff & ~(ctx->ddrA);
                 }
 
-                /* FIXME: CA2 output mode 0x08 */
                 if (ctx->CA2state == 1) {
                     ctx->CA2 = 1;
                     if (ctx->set_ca2) {
                         ctx->set_ca2(ctx);
                     }
-                    ctx->CA2state = 0;
                 }
 
                 /* irq flags are cleared when reading output port */
@@ -153,11 +151,9 @@ uint8_t mc6821core_peek(mc6821_state *ctx, int port /* rs1 */, int reg /* rs0 */
         } else {
             if (ctx->ctrlA & MC6821_CTRL_REG) {
                 data = ctx->dataA;
-#if 0
                 if (ctx->get_pa) {
                     data = ctx->get_pa(ctx);
                 }
-#endif
             } else {
                 data = ctx->ddrA;
             }
@@ -170,11 +166,9 @@ uint8_t mc6821core_peek(mc6821_state *ctx, int port /* rs1 */, int reg /* rs0 */
         } else {
             if (ctx->ctrlB & MC6821_CTRL_REG) {
                 data = ctx->dataB;
-#if 0
                 if (ctx->get_pb) {
                     data = ctx->get_pb(ctx);
                 }
-#endif
             } else {
                 data = ctx->ddrB;
             }
@@ -189,43 +183,45 @@ void mc6821core_store(mc6821_state *ctx, int port /* rs1 */, int reg /* rs0 */, 
         /* MC6821 Port A */
         if (reg == 1) {
             /* control register */
-            /* DBG(("MC6821: PA CTRL %02x\n", data)); */
+            /* DBG(("MC6821: PA CTRL %02x", data)); */
             ctx->ctrlA = data;
             if (data & MC6821_CTRL_C2DDR) {
                 /* CA2 is output */
                 switch (data & MC6821_CTRL_C2MODE) {
                     case MC6821_CTRL_C2_RESET_C2:
-                        ctx->CA2 = 0;
-                        /* update CA2 immediately */
-                        if (ctx->set_ca2) {
+                        /* update CA2 immediately only if it changed */
+                        if (ctx->set_ca2 && ctx->CA2) {
+                            ctx->CA2 = 0;
                             ctx->set_ca2(ctx);
                         }
+                        ctx->CA2state = 0;
                         break;
                     case MC6821_CTRL_C2_SET_C2:
-                        ctx->CA2 = 1;
-                        /* update CA2 immediately */
-                        if (ctx->set_ca2) {
+                        /* update CA2 immediately only if it changed */
+                        if (ctx->set_ca2 && !ctx->CA2) {
+                            ctx->CA2 = 1;
                             ctx->set_ca2(ctx);
                         }
+                        ctx->CA2state = 0;
                         break;
                     case MC6821_CTRL_C2_STROBE_C:
-                        DBG(("MC6821: PA CTRL unimplemented output mode %02x for CA2\n", data & MC6821_CTRL_C2MODE));
+                        DBG(("MC6821: PA CTRL unimplemented output mode %02x for CA2", data & MC6821_CTRL_C2MODE));
+                        ctx->CA2state = 0;
                         break;
                     case MC6821_CTRL_C2_STROBE_E:
-                        DBG(("MC6821: PA CTRL FIXME output mode %02x for CA2\n", data & MC6821_CTRL_C2MODE));
                         ctx->CA2state = 1;
                         break;
                 }
             } else {
                 /* CA2 is input */
                 if (data & MC6821_CTRL_C2_IRQEN) {
-                    DBG(("MC6821: PA CTRL unimplemented irq mode %02x for CA2\n", data & MC6821_CTRL_C2MODE));
+                    DBG(("MC6821: PA CTRL unimplemented irq mode %02x for CA2", data & MC6821_CTRL_C2MODE));
                 }
             }
         } else {
             if (ctx->ctrlA & MC6821_CTRL_REG) {
                 /* output register */
-                /* DBG(("MC6821: PA DATA %02x\n",data)); */
+                /* DBG(("MC6821: PA DATA %02x",data)); */
 
                 ctx->dataA = data;
                 if (ctx->set_pa) {
@@ -233,7 +229,7 @@ void mc6821core_store(mc6821_state *ctx, int port /* rs1 */, int reg /* rs0 */, 
                 }
             } else {
                 /* data direction register */
-                /* DBG(("MC6821: PA DDR %02x\n",data)); */
+                /* DBG(("MC6821: PA DDR %02x",data)); */
                 ctx->ddrA = data;
                 /* update port if ddr changes */
                 if (ctx->set_pa) {
@@ -245,7 +241,7 @@ void mc6821core_store(mc6821_state *ctx, int port /* rs1 */, int reg /* rs0 */, 
         /* MC6821 Port B */
         if (reg == 1) {
             /* control register */
-            DBG(("MC6821: PB CTRL %02x\n", data));
+            DBG(("MC6821: PB CTRL %02x", data));
             ctx->ctrlB = data;
             if (data & MC6821_CTRL_C2DDR) {
                 /* CB2 is output */
@@ -265,17 +261,17 @@ void mc6821core_store(mc6821_state *ctx, int port /* rs1 */, int reg /* rs0 */, 
                         }
                         break;
                     case MC6821_CTRL_C2_STROBE_C:
-                        DBG(("MC6821: PB CTRL unimplemented output mode %02x for CB2\n", data & MC6821_CTRL_C2MODE));
+                        DBG(("MC6821: PB CTRL unimplemented output mode %02x for CB2", data & MC6821_CTRL_C2MODE));
                         break;
                     case MC6821_CTRL_C2_STROBE_E:
-                        DBG(("MC6821: PB CTRL FIXME output mode %02x for CB2\n", data & MC6821_CTRL_C2MODE));
+                        DBG(("MC6821: PB CTRL FIXME output mode %02x for CB2", data & MC6821_CTRL_C2MODE));
                         ctx->CB2state = 1;
                         break;
                 }
             } else {
                 /* CB2 is input */
                 if (data & MC6821_CTRL_C2_IRQEN) {
-                    DBG(("MC6821: PB CTRL unimplemented irq mode %02x for CB2\n", data & MC6821_CTRL_C2MODE));
+                    DBG(("MC6821: PB CTRL unimplemented irq mode %02x for CB2", data & MC6821_CTRL_C2MODE));
                 }
             }
         } else {
@@ -306,7 +302,7 @@ void mc6821core_store(mc6821_state *ctx, int port /* rs1 */, int reg /* rs0 */, 
                 }
             } else {
                 /* data direction register */
-                DBG(("MC6821: PB DDR %02x\n", data));
+                DBG(("MC6821: PB DDR %02x", data));
                 ctx->ddrB = data;
                 /* update port if ddr changes */
                 if (ctx->set_pb) {
@@ -378,6 +374,16 @@ int mc6821core_snapshot_read_data(mc6821_state *ctx, snapshot_module_t *m)
         || SMR_B_INT(m, &ctx->CB2state) < 0) {
         return -1;
     }
+
+    return 0;
+}
+
+int mc6821core_dump(mc6821_state *ctx)
+{
+    mon_out("Port A: %02x DDR: %02x REG: %02x CTRL: %02x\n",
+            mc6821core_peek(ctx, 0, 0), ctx->ddrA, ctx->dataA, ctx->ctrlA);
+    mon_out("Port B: %02x DDR: %02x REG: %02x CTRL: %02x\n",
+            mc6821core_peek(ctx, 1, 0), ctx->ddrB, ctx->dataB, ctx->ctrlB);
 
     return 0;
 }

@@ -40,6 +40,7 @@
 #include "cmdline.h"
 #include "kbd.h"
 #include "fullscreenarch.h"
+#include "hotkeys.h"
 #include "keyboard.h"
 #include "lib.h"
 #include "log.h"
@@ -49,80 +50,18 @@
 #include "sysfile.h"
 #include "ui.h"
 #include "uihotkey.h"
+#include "uihotkeys.h"
 #include "uimenu.h"
 #include "util.h"
 #include "vkbd.h"
 
 /* #define SDL_DEBUG */
 
-static log_t sdlkbd_log = LOG_ERR;
-
-/* Hotkey filename */
-static char *hotkey_file = NULL;
+static log_t sdlkbd_log = LOG_DEFAULT;
 
 /* Menu keys */
 int sdl_ui_menukeys[MENU_ACTION_NUM];
 
-/* UI hotkeys: index is the key(combo), value is a pointer to the menu item.
-   4 is the number of the supported modifiers: shift, alt, control, meta. */
-#define SDLKBD_UI_HOTKEYS_MAX (SDL_NUM_SCANCODES * (1 << 4))
-ui_menu_entry_t *sdlkbd_ui_hotkeys[SDLKBD_UI_HOTKEYS_MAX];
-
-/* ------------------------------------------------------------------------ */
-
-/* Resources.  */
-
-static int hotkey_file_set(const char *val, void *param)
-{
-#ifdef SDL_DEBUG
-    fprintf(stderr, "%s: %s\n", __func__, val);
-#endif
-
-    if (util_string_set(&hotkey_file, val)) {
-        return 0;
-    }
-
-    return sdlkbd_hotkeys_load(hotkey_file);
-}
-
-static resource_string_t resources_string[] = {
-    { "HotkeyFile", NULL, RES_EVENT_NO, NULL,
-      &hotkey_file, hotkey_file_set, (void *)0 },
-    RESOURCE_STRING_LIST_END
-};
-
-int sdlkbd_init_resources(void)
-{
-    resources_string[0].factory_value = archdep_default_hotkey_file_name();
-
-    if (resources_register_string(resources_string) < 0) {
-        return -1;
-    }
-    return 0;
-}
-
-void sdlkbd_resources_shutdown(void)
-{
-    lib_free(resources_string[0].factory_value);
-    resources_string[0].factory_value = NULL;
-    lib_free(hotkey_file);
-    hotkey_file = NULL;
-}
-
-/* ------------------------------------------------------------------------ */
-
-static const cmdline_option_t cmdline_options[] =
-{
-    { "-hotkeyfile", SET_RESOURCE, CMDLINE_ATTRIB_NEED_ARGS,
-      NULL, NULL, "HotkeyFile", NULL,
-      "<name>", "Specify name of hotkey file" },
-    CMDLINE_LIST_END
-};
-
-int sdlkbd_init_cmdline(void)
-{
-    return cmdline_register_options(cmdline_options);
-}
 
 /* ------------------------------------------------------------------------ */
 
@@ -134,7 +73,7 @@ int sdlkbd_init_cmdline(void)
    SDL1 key handling, but a proper solution for
    handling unicode will still need to be made.
  */
-#ifdef USE_SDLUI2
+#ifdef USE_SDL2UI
 typedef struct SDL2Key_s {
     SDLKey SDL1x;
     SDLKey SDL2x;
@@ -258,276 +197,152 @@ SDLKey SDL1x_to_SDL2x_Keys(SDLKey key)
 }
 #endif
 
-static inline int sdlkbd_key_mod_to_index(SDLKey key, SDLMod mod)
+/* ------------------------------------------------------------------------ */
+
+static int sdlkbd_get_modifier(SDLMod mod)
 {
-    int i = 0;
+    int ret = 0;
+    if (mod & KMOD_LSHIFT) {
+        ret |= KBD_MOD_LSHIFT;
+    }
+    if (mod & KMOD_RSHIFT) {
+        ret |= KBD_MOD_RSHIFT;
+    }
+    if (mod & KMOD_LALT) {
+        ret |= KBD_MOD_LALT;
+    }
+    if (mod & KMOD_RALT) {
+        ret |= KBD_MOD_RALT;
+    }
+    if (mod & KMOD_LCTRL) {
+        ret |= KBD_MOD_LCTRL;
+    }
+    return ret;
+}
 
-    mod &= (KMOD_CTRL | KMOD_SHIFT | KMOD_ALT | KMOD_META);
+void sdlkbd_press(SDLKey key, SDLMod mod)
+{
+#if 0
+    ui_menu_entry_t *hotkey_action = NULL;
+#endif
+    ui_action_map_t *map;
 
-    if (mod) {
-        if (mod & KMOD_SHIFT) {
-            i |= (1 << 0);
-        }
-
-        if (mod & KMOD_ALT) {
-            i |= (1 << 1);
-        }
-
-        if (mod & KMOD_CTRL) {
-            i |= (1 << 2);
-        }
-
-        if (mod & KMOD_META) {
-            i |= (1 << 3);
+#ifdef SDL_DEBUG
+    log_debug(LOG_DEFAULT, "%s: %i (%s),%04x", __func__, key, SDL_GetKeyName(SDL1x_to_SDL2x_Keys(key)), mod);
+#endif
+#ifdef WINDOWS_COMPILE
+/* HACK: The Alt-Gr Key seems to work differently on windows and linux.
+         On Linux one Keypress "SDLK_RALT" will be produced.
+         On Windows two Keypresses will be produced, first "SDLK_LCTRL"
+         then "SDLK_RALT".
+         The following is a hack to compensate for that and make it
+         always work like on linux.
+*/
+    if (SDL1x_to_SDL2x_Keys(key) == SDLK_RALT) {
+        mod &= ~KMOD_LCTRL;
+        keyboard_key_released(SDL2x_to_SDL1x_Keys(SDLK_LCTRL), KBD_MOD_LCTRL);
+    } else {
+        if ((mod & KMOD_LCTRL) && (mod & KMOD_RALT)) {
+            mod &= ~KMOD_LCTRL;
         }
     }
-    return (i * SDL_NUM_SCANCODES) + key;
-}
-
-static ui_menu_entry_t *sdlkbd_get_hotkey(SDLKey key, SDLMod mod)
-{
-    return sdlkbd_ui_hotkeys[sdlkbd_key_mod_to_index(key, mod)];
-}
-
-void sdlkbd_set_hotkey(SDLKey key, SDLMod mod, ui_menu_entry_t *value)
-{
-    sdlkbd_ui_hotkeys[sdlkbd_key_mod_to_index(key, mod)] = value;
-}
-
-static void sdlkbd_keyword_clear(void)
-{
-    int i;
-
-    for (i = 0; i < SDLKBD_UI_HOTKEYS_MAX; ++i) {
-        sdlkbd_ui_hotkeys[i] = NULL;
-    }
-}
-
-static void sdlkbd_parse_keyword(char *buffer)
-{
-    char *key;
-
-    key = strtok(buffer + 1, " \t:");
-
-    if (!strcmp(key, "CLEAR")) {
-        sdlkbd_keyword_clear();
-    }
-}
-
-static void sdlkbd_parse_entry(char *buffer)
-{
-    char *p;
-    char *full_path;
-    int keynum;
-    ui_menu_entry_t *action;
-
-    p = strtok(buffer, " \t:");
-
-    keynum = atoi(p);
-
-    if (keynum >= SDLKBD_UI_HOTKEYS_MAX) {
-        log_error(sdlkbd_log, "Too large hotkey %i!", keynum);
+#endif
+    if ((int)(key) == sdl_ui_menukeys[0] && hotkeys_allowed_modifiers(mod) == KMOD_NONE) {
+        sdl_ui_activate();
         return;
     }
 
-    p = strtok(NULL, "\r\n");
-    if (p != NULL) {
-        full_path = lib_stralloc(p);
-        action = sdl_ui_hotkey_action(p);
-        if (action == NULL) {
-            log_warning(sdlkbd_log, "Cannot find menu item \"%s\"!", full_path);
-        } else {
-            sdlkbd_ui_hotkeys[keynum] = action;
-        }
-        lib_free(full_path);
+    /* This iterates an array of ~270 elements at the time of writing, exiting
+     * early when a map is found for the hotkey, otherwise iterating the full
+     * array.
+     */
+    map = ui_action_map_get_by_arch_hotkey(SDL1x_to_SDL2x_Keys(key), mod);
+    if (map != NULL) {
+#ifdef SDL_DEBUG
+        printf("Hotkey pressed for %d (%s)\n", map->action, ui_action_get_name(map->action));
+#endif
+        ui_action_trigger(map->action);
+        return; /* do not pass keypress to emulated keyboard */
     }
+
+    keyboard_key_pressed((unsigned long)key, sdlkbd_get_modifier(mod));
 }
 
-int sdlkbd_hotkeys_load(const char *filename)
+void sdlkbd_release(SDLKey key, SDLMod mod)
 {
-    FILE *fp;
-    char *complete_path = NULL;
-    char buffer[1000];
+#ifdef SDL_DEBUG
+    log_debug(LOG_DEFAULT, "%s: %i (%s),%04x", __func__, key, SDL_GetKeyName(key), mod);
+#endif
 
-    /* Silently ignore keymap load on resource & cmdline init */
-    if (sdlkbd_log == LOG_ERR) {
-        return 0;
-    }
-
-    if (filename == NULL) {
-        log_warning(sdlkbd_log, "Failed to open NULL.");
-        return -1;
-    }
-
-    fp = sysfile_open(filename, &complete_path, MODE_READ_TEXT);
-
-    if (fp == NULL) {
-        log_warning(sdlkbd_log, "Failed to open `%s'.", filename);
-        return -1;
-    }
-
-    log_message(sdlkbd_log, "Loading hotkey map `%s'.", complete_path);
-
-    lib_free(complete_path);
-
-    do {
-        buffer[0] = 0;
-        if (fgets(buffer, 999, fp)) {
-
-            if (strlen(buffer) == 0) {
-                break;
-            }
-            buffer[strlen(buffer) - 1] = 0; /* remove newline */
-
-            /* remove comments */
-            if (buffer[0] == '#') {
-                buffer[0] = 0;
-            }
-
-            switch (*buffer) {
-                case 0:
-                    break;
-                case '!':
-                    /* keyword handling */
-                    sdlkbd_parse_keyword(buffer);
-                    break;
-                default:
-                    /* table entry handling */
-                    sdlkbd_parse_entry(buffer);
-                    break;
-            }
-        }
-    } while (!feof(fp));
-    fclose(fp);
-
-    return 0;
-}
-
-int sdlkbd_hotkeys_dump(const char *filename)
-{
-    FILE *fp;
-    int i;
-    char *hotkey_path;
-
-    if (filename == NULL) {
-        return -1;
-    }
-
-    fp = fopen(filename, MODE_WRITE_TEXT);
-
-    if (fp == NULL) {
-        return -1;
-    }
-
-    fprintf(fp, "# VICE hotkey mapping file\n"
-            "#\n"
-            "# A hotkey map is read in as a patch to the current map.\n"
-            "#\n"
-            "# File format:\n"
-            "# - comment lines start with '#'\n"
-            "# - keyword lines start with '!keyword'\n"
-            "# - normal line has 'keynum path&to&menuitem'\n"
-            "#\n"
-            "# Keywords and their lines are:\n"
-            "# '!CLEAR'    clear all mappings\n"
-            "#\n\n"
-            );
-
-    fprintf(fp, "!CLEAR\n\n");
-
-    for (i = 0; i < SDLKBD_UI_HOTKEYS_MAX; ++i) {
-        if (sdlkbd_ui_hotkeys[i]) {
-            hotkey_path = sdl_ui_hotkey_path(sdlkbd_ui_hotkeys[i]);
-            fprintf(fp, "%i %s\n", i, hotkey_path);
-            lib_free(hotkey_path);
+#ifdef WINDOWS_COMPILE
+/* HACK: The Alt-Gr Key seems to work differently on windows and linux.
+         see above */
+    if (SDL1x_to_SDL2x_Keys(key) == SDLK_RALT) {
+        mod &= ~KMOD_LCTRL;
+    } else {
+        if ((mod & KMOD_LCTRL) && (mod & KMOD_RALT)) {
+            mod &= ~KMOD_LCTRL;
         }
     }
+#endif
 
-    fclose(fp);
-
-    return 0;
+    keyboard_key_released((unsigned long)key, sdlkbd_get_modifier(mod));
 }
 
-/* ------------------------------------------------------------------------ */
-
-ui_menu_action_t sdlkbd_press(SDLKey key, SDLMod mod)
+ui_menu_action_t sdlkbd_press_for_menu_action(SDLKey key, SDLMod mod)
 {
     ui_menu_action_t i, retval = MENU_ACTION_NONE;
-    ui_menu_entry_t *hotkey_action = NULL;
 
 #ifdef SDL_DEBUG
-    fprintf(stderr, "%s: %i (%s),%i\n", __func__, key, SDL_GetKeyName(key), mod);
+    log_debug(LOG_DEFAULT, "%s: %i (%s),%04x", __func__, key, SDL_GetKeyName(key), mod);
 #endif
-    if (sdl_menu_state || (sdl_vkbd_state & SDL_VKBD_ACTIVE)) {
-        if (key != SDLK_UNKNOWN) {
-            for (i = MENU_ACTION_UP; i < MENU_ACTION_NUM; ++i) {
-                if (sdl_ui_menukeys[i] == (int)key) {
-                    retval = i;
-                    break;
-                }
-            }
-            if ((int)(key) == sdl_ui_menukeys[0]) {
-                retval = MENU_ACTION_EXIT;
+
+    if (key != SDLK_UNKNOWN) {
+        for (i = MENU_ACTION_UP; i < MENU_ACTION_NUM; ++i) {
+            if (sdl_ui_menukeys[i] == (int)key) {
+                retval = i;
+                break;
             }
         }
-        return retval;
+        if ((int)(key) == sdl_ui_menukeys[0]) {
+            retval = MENU_ACTION_EXIT;
+        }
     }
-
-    if ((int)(key) == sdl_ui_menukeys[0]) {
-        sdl_ui_activate();
-        return retval;
-    }
-
-    if ((hotkey_action = sdlkbd_get_hotkey(key, mod)) != NULL) {
-        sdl_ui_hotkey(hotkey_action);
-        return retval;
-    }
-
-    keyboard_key_pressed((unsigned long)key);
     return retval;
 }
 
-ui_menu_action_t sdlkbd_release(SDLKey key, SDLMod mod)
+ui_menu_action_t sdlkbd_release_for_menu_action(SDLKey key, SDLMod mod)
 {
     ui_menu_action_t i, retval = MENU_ACTION_NONE_RELEASE;
 
 #ifdef SDL_DEBUG
-    fprintf(stderr, "%s: %i (%s),%i\n", __func__, key, SDL_GetKeyName(key), mod);
+    log_debug(LOG_DEFAULT, "%s: %i (%s),%04x", __func__, key, SDL_GetKeyName(key), mod);
 #endif
-    if (sdl_vkbd_state & SDL_VKBD_ACTIVE) {
-        if (key != SDLK_UNKNOWN) {
-            for (i = MENU_ACTION_UP; i < MENU_ACTION_NUM; ++i) {
-                if (sdl_ui_menukeys[i] == (int)key) {
-                    retval = i;
-                    break;
-                }
+
+    if (key != SDLK_UNKNOWN) {
+        for (i = MENU_ACTION_UP; i < MENU_ACTION_NUM; ++i) {
+            if (sdl_ui_menukeys[i] == (int)key) {
+                retval = i;
+                break;
             }
         }
-        return retval + MENU_ACTION_NONE_RELEASE;
     }
-
-    keyboard_key_released((unsigned long)key);
-    return retval;
+    return retval + MENU_ACTION_NONE_RELEASE;
 }
 
 /* ------------------------------------------------------------------------ */
 
 void kbd_arch_init(void)
 {
-#ifdef SDL_DEBUG
-    fprintf(stderr, "%s: hotkey table size %u (%lu bytes)\n", __func__, SDLKBD_UI_HOTKEYS_MAX, SDLKBD_UI_HOTKEYS_MAX * sizeof(ui_menu_entry_t *));
-#endif
-
     sdlkbd_log = log_open("SDLKeyboard");
 
+    /* initialize generic hotkeys system
+     * (not sure it should be here, but seems early enough) */
+    ui_hotkeys_init("sdl");
+
+#if 0
     sdlkbd_keyword_clear();
-    /* first load the defaults, then patch them with the user defined hotkeys */
-    if (machine_class == VICE_MACHINE_VSID) {
-        sdlkbd_hotkeys_load("sdl_hotkeys_vsid.vkm");
-    } else {
-        sdlkbd_hotkeys_load("sdl_hotkeys.vkm");
-    }
-    sdlkbd_hotkeys_load(hotkey_file);
+#endif
 }
 
 signed long kbd_arch_keyname_to_keynum(char *keyname)
@@ -561,9 +376,14 @@ void kbd_initialize_numpad_joykeys(int* joykeys)
     joykeys[6] = SDL2x_to_SDL1x_Keys(SDLK_KP7);
     joykeys[7] = SDL2x_to_SDL1x_Keys(SDLK_KP8);
     joykeys[8] = SDL2x_to_SDL1x_Keys(SDLK_KP9);
+    joykeys[9] = SDL2x_to_SDL1x_Keys(SDLK_KP_PERIOD);
+    joykeys[10] = SDL2x_to_SDL1x_Keys(SDLK_KP_ENTER);
 }
 
-const char *kbd_get_menu_keyname(void)
+
+char *kbd_get_menu_keyname(void)
 {
-    return SDL_GetKeyName(SDL1x_to_SDL2x_Keys(sdl_ui_menukeys[0]));
+    /* any modifier used to set a menu key via the UI is accepted as the key, and
+     * the resources don't support modifiers either */
+    return lib_strdup(SDL_GetKeyName(SDL1x_to_SDL2x_Keys(sdl_ui_menukeys[0])));
 }

@@ -24,7 +24,11 @@
 
 #include "resid-config.h"
 #include "voice.h"
+#if NEW_8580_FILTER
+#include "filter8580new.h"
+#else
 #include "filter.h"
+#endif
 #include "extfilt.h"
 #include "pot.h"
 
@@ -45,23 +49,8 @@ public:
   bool set_sampling_parameters(double clock_freq, sampling_method method,
   double sample_freq, double pass_freq = -1,
   double filter_scale = 0.97);
-
-  // Added for BMC64. This method pre-populates the resampling tables
-  // for RESAMPLING and FAST_RESAMPLING methods so that this data is
-  // cached and available for set_sampling_parameters when needed rather
-  // than having to be computed on-demand and 'freezing' the emulator
-  // for multiple seconds.  This is part of the effort to keep BMC64
-  // booting as fast as possible so this method is called by cores 2 & 3
-  // in parallel, each handling one half of the table.  Also, since
-  // the cached data is only relevant for these parameters, they cannot
-  // be changed after init.  So things like pass_freq changing will
-  // require a reboot before taking effect.  The UI doesn't allow
-  // changing these values anyway.
-  static void ComputeSamplingTable(double clock_freq, sampling_method method,
-                                   double sample_freq, double pass_freq,
-                                   double filter_scale, int partition);
-
   void adjust_sampling_frequency(double sample_freq);
+  void enable_raw_debug_output(bool enable);
 
   void clock();
   void clock(cycle_count delta_t);
@@ -110,7 +99,9 @@ public:
   void input(short sample);
 
   // 16-bit output (AUDIO OUT).
-  short output();
+  int output();
+
+  void debugoutput(void);
 
  protected:
   static double I0(double x);
@@ -138,6 +129,9 @@ public:
   reg8 write_address;
 
   double clock_frequency;
+
+  // Used to amplify the output by scaleFactor/2 to get an adequate playback volume
+  int scaleFactor;
 
   enum {
     // Resampling constants.
@@ -177,6 +171,8 @@ public:
 
   // FIR_RES filter tables (FIR_N*FIR_RES).
   short* fir;
+
+  bool raw_debug_output; // FIXME: should be private?
 };
 
 
@@ -192,7 +188,7 @@ public:
 // Read 16-bit sample from audio output.
 // ----------------------------------------------------------------------------
 RESID_INLINE
-short SID::output()
+int SID::output()
 {
   return extfilt.output();
 }
@@ -240,6 +236,10 @@ void SID::clock()
   // Age bus value.
   if (unlikely(!--bus_value_ttl)) {
     bus_value = 0;
+  }
+
+  if (unlikely(raw_debug_output)) {
+    debugoutput();
   }
 }
 

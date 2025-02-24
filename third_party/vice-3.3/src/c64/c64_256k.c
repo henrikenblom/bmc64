@@ -59,7 +59,7 @@ uint8_t c64_256k_CRB;
 
 int c64_256k_start;
 
-static log_t c64_256k_log = LOG_ERR;
+static log_t c64_256k_log = LOG_DEFAULT;
 
 static int c64_256k_activate(void);
 static int c64_256k_deactivate(void);
@@ -162,18 +162,20 @@ static int c64_256k_dump(void)
 /* ---------------------------------------------------------------------*/
 
 static io_source_t c64_256k_device = {
-    "C64 256K",
-    IO_DETACH_RESOURCE,
-    "C64_256K",
-    0xdf80, 0xdfff, 0x7f,
-    1, /* read is always valid */
-    c64_256k_store,
-    c64_256k_read,
-    c64_256k_read,
-    c64_256k_dump,
-    CARTRIDGE_C64_256K,
-    0,
-    0
+    "C64 256K",           /* name of the device */
+    IO_DETACH_RESOURCE,   /* use resource to detach the device when involved in a read-collision */
+    "C64_256K",           /* resource to set to '0' */
+    0xdf80, 0xdfff, 0x03, /* range for the device, registers:$df80-df83, mirrors:$df84-$dfff, range can be changed */
+    1,                    /* read is always valid */
+    c64_256k_store,       /* store function */
+    NULL,                 /* NO poke function */
+    c64_256k_read,        /* read function */
+    c64_256k_read,        /* peek function */
+    c64_256k_dump,        /* device state information dump function */
+    CARTRIDGE_C64_256K,   /* cartridge ID */
+    IO_PRIO_NORMAL,       /* normal priority, device read needs to be checked for collisions */
+    0,                    /* insertion order, gets filled in by the registration function */
+    IO_MIRROR_NONE        /* NO mirroring */
 };
 
 static io_source_list_t *c64_256k_list_item = NULL;
@@ -193,7 +195,7 @@ int set_c64_256k_enabled(int value, int disable_reset)
             return -1;
         }
         if (!disable_reset) {
-            machine_trigger_reset(MACHINE_RESET_MODE_HARD);
+            machine_trigger_reset(MACHINE_RESET_MODE_POWER_CYCLE);
         }
         io_source_unregister(c64_256k_list_item);
         c64_256k_list_item = NULL;
@@ -204,7 +206,7 @@ int set_c64_256k_enabled(int value, int disable_reset)
             return -1;
         }
         if (!disable_reset) {
-            machine_trigger_reset(MACHINE_RESET_MODE_HARD);
+            machine_trigger_reset(MACHINE_RESET_MODE_POWER_CYCLE);
         }
         c64_256k_list_item = io_source_register(&c64_256k_device);
         c64_256k_enabled = 1;
@@ -250,7 +252,7 @@ static int set_c64_256k_base(int val, void *param)
             c64_256k_device.end_address = (uint16_t)(val + 0x7f);
             break;
         default:
-            log_message(c64_256k_log, "Unknown 256K base %X.", val);
+            log_message(c64_256k_log, "Unknown 256K base %X.", (unsigned int)val);
             return -1;
     }
 
@@ -431,6 +433,19 @@ void c64_256k_ram_segment3_store(uint16_t addr, uint8_t value)
     }
 }
 
+void c64_256k_ram_inject(uint16_t addr, uint8_t value)
+{
+    if (addr < 0x4000) {
+        c64_256k_ram_segment0_store(addr, value);
+    } else if (addr < 0x8000) {
+        c64_256k_ram_segment1_store(addr, value);
+    } else if (addr < 0xc000) {
+        c64_256k_ram_segment2_store(addr, value);
+    } else {
+        c64_256k_ram_segment3_store(addr, value);
+    }
+}
+
 uint8_t c64_256k_ram_segment0_read(uint16_t addr)
 {
     return c64_256k_ram[(c64_256k_segment0 * 0x4000) + (addr & 0x3fff)];
@@ -519,7 +534,7 @@ int c64_256k_snapshot_read(struct snapshot_s *s)
     }
 
     /* do not accept higher versions than current */
-    if (vmajor > SNAP_MAJOR || vminor > SNAP_MINOR) {
+    if (snapshot_version_is_bigger(vmajor, vminor, SNAP_MAJOR, SNAP_MINOR)) {
         snapshot_set_error(SNAPSHOT_MODULE_HIGHER_VERSION);
         goto fail;
     }
@@ -559,7 +574,7 @@ int c64_256k_snapshot_read(struct snapshot_s *s)
     }
 
     return snapshot_module_close(m);
-   
+
 fail:
     if (m != NULL) {
         snapshot_module_close(m);

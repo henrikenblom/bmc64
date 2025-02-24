@@ -24,6 +24,8 @@
  *
  */
 
+/* #define NETWORK_DEBUG */
+/* #define NETWORK_TRAFFIC_DEBUG */
 
 #include "vice.h"
 
@@ -33,6 +35,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdbool.h>
 
 #ifdef HAVE_STRINGS_H
 #include <strings.h>
@@ -56,7 +59,17 @@
 #include "vsync.h"
 #include "vsyncapi.h"
 
-/* #define NETWORK_DEBUG */
+#ifdef NETWORK_DEBUG
+#define DBG(x) log_printf  x
+#else
+#define DBG(x)
+#endif
+
+#ifdef NETWORK_TRAFFIC_DEBUG
+#define DBGT(x) log_printf  x
+#else
+#define DBGT(x)
+#endif
 
 static network_mode_t network_mode = NETWORK_IDLE;
 
@@ -92,7 +105,7 @@ static int set_server_bind_address(const char *val, void *param)
 
 static int set_server_port(int val, void *param)
 {
-    if (val < 0 || val > 65535) {
+    if (val < 1024 || val > 65535) {
         return -1;
     }
 
@@ -226,7 +239,7 @@ int network_cmdline_options_init(void)
 static void network_free_frame_event_list(void)
 {
     int i;
-
+    DBG(("network_free_frame_event_list"));
     if (frame_event_list != NULL) {
         for (i = 0; i < frame_delta; i++) {
             event_clear_list(&(frame_event_list[i]));
@@ -240,7 +253,7 @@ static void network_free_frame_event_list(void)
 static void network_event_record_sync_test(uint16_t addr, void *data)
 {
     uint8_t regbuf[5 * 4];
-
+    DBGT(("network_event_record_sync_test"));
     util_dword_to_le_buf(&regbuf[0 * 4], (uint32_t)(maincpu_get_pc()));
     util_dword_to_le_buf(&regbuf[1 * 4], (uint32_t)(maincpu_get_a()));
     util_dword_to_le_buf(&regbuf[2 * 4], (uint32_t)(maincpu_get_x()));
@@ -252,6 +265,7 @@ static void network_event_record_sync_test(uint16_t addr, void *data)
 
 static void network_init_frame_event_list(void)
 {
+    DBG(("network_init_frame_event_list"));
     frame_event_list = lib_malloc(sizeof(event_list_state_t) * frame_delta);
     memset(frame_event_list, 0, sizeof(event_list_state_t) * frame_delta);
     current_frame = 0;
@@ -263,6 +277,7 @@ static void network_init_frame_event_list(void)
 
 static void network_prepare_next_frame(void)
 {
+    DBGT(("network_prepare_next_frame"));
     current_frame = (current_frame + 1) % frame_delta;
     frame_to_play = (current_frame + 1) % frame_delta;
     event_clear_list(&(frame_event_list[current_frame]));
@@ -278,6 +293,8 @@ static unsigned int network_create_event_buffer(uint8_t **buf,
     event_list_t *current_event, *last_event;
     int data_len = 0;
     int num_of_events;
+
+    DBGT(("network_create_event_buffer"));
 
     if (list == NULL) {
         return 0;
@@ -317,29 +334,39 @@ static event_list_state_t *network_create_event_list(uint8_t *remote_event_buffe
 {
     event_list_state_t *list;
     unsigned int type, size;
-    uint8_t *data;
+    uint8_t *data = NULL;
     uint8_t *bufptr = remote_event_buffer;
+
+    DBGT(("network_create_event_list entry: %p", bufptr));
 
     list = lib_malloc(sizeof(event_list_state_t));
     event_register_event_list(list);
 
-    do {
-        type = util_le_buf_to_dword(&bufptr[0]);
-        /*  clk = util_le_buf_to_dword(&bufptr[4]); */
-        size = util_le_buf_to_dword(&bufptr[8]);
-        data = &bufptr[12];
-        bufptr += 12 + size;
-        event_record_in_list(list, type, data, size);
-    } while (type != EVENT_LIST_END);
+    if (bufptr == NULL) {
+        log_error(LOG_DEFAULT, "network_create_event_list: got NULL pointer");
+        event_record_in_list(list, EVENT_LIST_END, NULL, 0);
+    } else {
+        do {
+            DBGT(("network_create_event_list: %p", bufptr));
+            type = util_le_buf_to_dword(&bufptr[0]);
+            /*  clk = util_le_buf_to_dword(&bufptr[4]); */
+            size = util_le_buf_to_dword(&bufptr[8]);
+            data = &bufptr[12];
+            bufptr += 12 + size;
+            event_record_in_list(list, type, data, size);
+        } while (type != EVENT_LIST_END);
+    }
+    DBGT(("network_create_event_list exit: %p", bufptr));
 
     return list;
 }
 
-static int network_recv_buffer(vice_network_socket_t * s, uint8_t *buf, int len)
+static ssize_t network_recv_buffer(vice_network_socket_t * s, uint8_t *buf, ssize_t len)
 {
-    int t;
-    int received_total = 0;
+    ssize_t t;
+    ssize_t received_total = 0;
 
+    DBGT(("network_recv_buffer len: %"PRI_SSIZE_T, len));
     while (received_total < len) {
         t = vice_network_receive(s, buf, len - received_total, 0);
 
@@ -359,11 +386,12 @@ static int network_recv_buffer(vice_network_socket_t * s, uint8_t *buf, int len)
 #define SEND_FLAGS 0
 #endif
 
-static int network_send_buffer(vice_network_socket_t * s, const uint8_t *buf, int len)
+static ssize_t network_send_buffer(vice_network_socket_t * s, const uint8_t *buf, ssize_t len)
 {
-    int t;
-    int sent_total = 0;
+    ssize_t t;
+    ssize_t sent_total = 0;
 
+    DBGT(("network_send_buffer len: %"PRI_SSIZE_T, len));
     while (sent_total < len) {
         t = vice_network_send(s, buf, len - sent_total, SEND_FLAGS);
 
@@ -380,87 +408,98 @@ static int network_send_buffer(vice_network_socket_t * s, const uint8_t *buf, in
 #define NUM_OF_TESTPACKETS 50
 
 typedef struct {
-    unsigned long t;
+    tick_t t;
     unsigned char buf[0x60];
 } testpacket;
 
-static void network_test_delay(void)
+static int network_test_delay(void)
 {
-    int i, j;
-    uint8_t new_frame_delta;
+    int i, j, ret = -1;
+    uint8_t new_frame_delta = 5; /* default to use on error */
     unsigned char *buf;
     testpacket pkt;
 
-    long packet_delay[NUM_OF_TESTPACKETS];
+    tick_t packet_delay[NUM_OF_TESTPACKETS];
     char st[256];
 
-    vsyncarch_init();
-
-    ui_display_statustext("Testing best frame delay...", 0);
+    ui_display_statustext("Testing best frame delay...", false);
 
     buf = (unsigned char*)&pkt;
 
     if (network_mode == NETWORK_SERVER_CONNECTED) {
+        DBG(("network_test_delay (server)"));
         for (i = 0; i < NUM_OF_TESTPACKETS; i++) {
-            pkt.t = vsyncarch_gettime();
-            if (network_send_buffer(network_socket, buf, sizeof(testpacket)) < 0
-                || network_recv_buffer(network_socket, buf, sizeof(testpacket)) < 0) {
-                return;
+            pkt.t = tick_now();
+            DBG(("packet %d send at tick: %u", i, pkt.t));
+            if (network_send_buffer(network_socket, buf, sizeof(testpacket)) < 0) {
+                goto exiterror;
             }
-            packet_delay[i] = vsyncarch_gettime() - pkt.t;
+            DBG(("packet %d recieve at tick: %u", i, pkt.t));
+            if (network_recv_buffer(network_socket, buf, sizeof(testpacket)) < 0) {
+                goto exiterror;
+            }
+            packet_delay[i] = tick_now_delta(pkt.t);
+            DBG(("packet %d delay: %u", i, packet_delay[i]));
         }
         /* Sort the packets delays*/
         for (i = 0; i < NUM_OF_TESTPACKETS - 1; i++) {
             for (j = i + 1; j < NUM_OF_TESTPACKETS; j++) {
                 if (packet_delay[i] < packet_delay[j]) {
-                    long d = packet_delay[i];
+                    tick_t d = packet_delay[i];
                     packet_delay[i] = packet_delay[j];
                     packet_delay[j] = d;
                 }
             }
-#ifdef NETWORK_DEBUG
-            log_debug("packet_delay[%d]=%ld", i, packet_delay[i]);
-#endif
+            DBG(("packet_delay[%d]=%u", i, packet_delay[i]));
         }
-#ifdef NETWORK_DEBUG
-        log_debug("vsyncarch_frequency = %ld", vsyncarch_frequency());
-#endif
+        DBG(("tick_per_second = %u", tick_per_second()));
+
         /* calculate delay with 90% of packets beeing fast enough */
         /* FIXME: This needs some further investigation */
         new_frame_delta = 5 + (uint8_t)(vsync_get_refresh_frequency()
                                      * packet_delay[(int)(0.1 * NUM_OF_TESTPACKETS)]
-                                     / (float)vsyncarch_frequency());
-        network_send_buffer(network_socket, &new_frame_delta,
-                            sizeof(new_frame_delta));
+                                     / (float)tick_per_second());
+        if (network_send_buffer(network_socket, &new_frame_delta, sizeof(new_frame_delta)) < 0) {
+            goto exiterror;
+        }
     } else {
+        DBG(("network_test_delay (client)"));
         /* network_mode == NETWORK_CLIENT */
         for (i = 0; i < NUM_OF_TESTPACKETS; i++) {
-            if (network_recv_buffer(network_socket, buf, sizeof(testpacket)) < 0
-                || network_send_buffer(network_socket, buf, sizeof(testpacket)) < 0) {
-                return;
+            if (network_recv_buffer(network_socket, buf, sizeof(testpacket)) < 0) {
+                goto exiterror;
+            } else if (network_send_buffer(network_socket, buf, sizeof(testpacket)) < 0) {
+                goto exiterror;
             }
         }
         network_recv_buffer(network_socket, &new_frame_delta,
                             sizeof(new_frame_delta));
     }
+    ret = 0;
+exiterror:
     network_free_frame_event_list();
     frame_delta = new_frame_delta;
     network_init_frame_event_list();
     sprintf(st, "Using %d frames delay.", frame_delta);
-    log_debug("netplay connected with %d frames delta.", frame_delta);
-    ui_display_statustext(st, 1);
+    log_debug(LOG_DEFAULT, "netplay connected with %d frames delta.", frame_delta);
+    ui_display_statustext(st, true);
+    return ret;
 }
 
+/* triggers on the server, when the client connects */
 static void network_server_connect_trap(uint16_t addr, void *data)
 {
     FILE *f;
     uint8_t *buf;
-    size_t buf_size;
+    off_t buf_size;
     uint8_t send_size4[4];
-    long i;
+    ssize_t i;
     event_list_state_t settings_list;
 
+    DBG(("network_server_connect_trap"));
+
     vsync_suspend_speed_eval();
+    sound_suspend();
 
     /* Create snapshot and send it */
     snapshotfilename = archdep_tmpnam();
@@ -471,21 +510,23 @@ static void network_server_connect_trap(uint16_t addr, void *data)
             lib_free(snapshotfilename);
             return;
         }
-        buf_size = util_file_length(f);
-        buf = lib_malloc(buf_size);
-        if (fread(buf, 1, buf_size, f) == 0) {
-            log_debug("network_server_connect_trap read failed.");
+        buf_size = archdep_file_size(f);
+        buf = lib_malloc((size_t)buf_size);
+        if (fread(buf, 1, (size_t)buf_size, f) == 0) {
+            log_debug(LOG_DEFAULT, "network_server_connect_trap read failed.");
         }
         fclose(f);
 
-        ui_display_statustext("Sending snapshot to client...", 0);
+        ui_display_statustext("Sending snapshot to client...", false);
         util_int_to_le_buf4(send_size4, (int)buf_size);
-        network_send_buffer(network_socket, send_size4, 4);
-        i = network_send_buffer(network_socket, buf, (int)buf_size);
+        if ((i = network_send_buffer(network_socket, send_size4, 4)) < 0) {
+        } else {
+            i = network_send_buffer(network_socket, buf, (int)buf_size);
+        }
         lib_free(buf);
         if (i < 0) {
             ui_error("Cannot send snapshot to client");
-            ui_display_statustext("", 0);
+            ui_display_statustext("", false);
             lib_free(snapshotfilename);
             return;
         }
@@ -499,8 +540,10 @@ static void network_server_connect_trap(uint16_t addr, void *data)
         buf_size = (size_t)network_create_event_buffer(&buf, &(settings_list));
         util_int_to_le_buf4(send_size4, (int)buf_size);
 
-        network_send_buffer(network_socket, send_size4, 4);
-        network_send_buffer(network_socket, buf, (int)buf_size);
+        if ((i = network_send_buffer(network_socket, send_size4, 4) < 0)) {
+        } else {
+            i = network_send_buffer(network_socket, buf, (int)buf_size);
+        }
 
         event_clear_list(&settings_list);
         lib_free(buf);
@@ -508,13 +551,21 @@ static void network_server_connect_trap(uint16_t addr, void *data)
         current_send_frame = 0;
         last_received_frame = 0;
 
-        network_test_delay();
+        if (i < 0) {
+            lib_free(snapshotfilename);
+            return;
+        }
+
+        if (network_test_delay() < 0) {
+            log_error(LOG_DEFAULT, "network_test_delay failed");
+        }
     } else {
         ui_error("Cannot create snapshot file %s", snapshotfilename);
     }
     lib_free(snapshotfilename);
 }
 
+/* triggers on the client, when it connects to the server */
 static void network_client_connect_trap(uint16_t addr, void *data)
 {
     uint8_t *buf;
@@ -522,7 +573,12 @@ static void network_client_connect_trap(uint16_t addr, void *data)
     uint8_t recv_buf4[4];
     event_list_state_t *settings_list;
 
-    /* Set proper settings */
+    DBG(("network_client_connect_trap"));
+
+    vsync_suspend_speed_eval();
+    sound_suspend();
+
+    /* Setup strict event safe values for the resources that need it */
     if (resources_set_event_safe() < 0) {
         ui_error("Warning! Failed to set netplay-safe settings.");
     }
@@ -559,7 +615,9 @@ static void network_client_connect_trap(uint16_t addr, void *data)
 
     network_mode = NETWORK_CLIENT;
 
-    network_test_delay();
+    if (network_test_delay() < 0) {
+        log_error(LOG_DEFAULT, "network_test_delay failed");
+    }
     lib_free(snapshotfilename);
 }
 
@@ -568,7 +626,9 @@ static void network_client_connect_trap(uint16_t addr, void *data)
 void network_event_record(unsigned int type, void *data, unsigned int size)
 {
     unsigned int control = 0;
-    uint8_t joyport;
+    uint16_t joyport;
+
+    DBGT(("network_event_record type: %u size: %u", type, size));
 
     switch (type) {
         case EVENT_KEYBOARD_MATRIX:
@@ -587,7 +647,7 @@ void network_event_record(unsigned int type, void *data, unsigned int size)
             control = NETWORK_CONTROL_RSRC;
             break;
         case EVENT_JOYSTICK_VALUE:
-            joyport = ((uint8_t *)data)[0];
+            joyport = ((uint16_t *)data)[0];
             if (joyport == 1) {
                 control = NETWORK_CONTROL_JOY1;
             }
@@ -612,7 +672,12 @@ void network_event_record(unsigned int type, void *data, unsigned int size)
 
 void network_attach_image(unsigned int unit, const char *filename)
 {
+    /* TODO: drive 1? */
+    unsigned int drive = 0;
+
     unsigned int control = NETWORK_CONTROL_DEVC;
+
+    DBG(("network_attach_image unit: %u filename: %s", unit, filename));
 
     if (network_get_mode() == NETWORK_CLIENT) {
         control <<= NETWORK_CONTROL_CLIENTOFFSET;
@@ -622,7 +687,7 @@ void network_attach_image(unsigned int unit, const char *filename)
         return;
     }
 
-    event_record_attach_in_list(&(frame_event_list[current_frame]), unit, filename, 1);
+    event_record_attach_in_list(&(frame_event_list[current_frame]), unit, drive, filename, 1);
 }
 
 int network_get_mode(void)
@@ -632,18 +697,20 @@ int network_get_mode(void)
 
 int network_connected(void)
 {
-    if (network_mode == NETWORK_SERVER_CONNECTED
-        || network_mode == NETWORK_CLIENT) {
+    if ((network_mode == NETWORK_SERVER_CONNECTED) ||
+        (network_mode == NETWORK_CLIENT)) {
         return 1;
-    } else {
-        return 0;
     }
+    return 0;
 }
 
 int network_start_server(void)
 {
     vice_network_socket_address_t * server_addr = NULL;
     int ret = -1;
+
+    DBG(("network_start_server (network_mode is: %u) on %s:%d",
+         network_mode, server_bind_address, server_port));
 
     do {
         if (network_mode != NETWORK_IDLE) {
@@ -652,15 +719,17 @@ int network_start_server(void)
 
         server_addr = vice_network_address_generate(server_bind_address, server_port);
         if (!server_addr) {
+            DBG(("vice_network_address_generate failed, can not start server."));
             break;
         }
 
         listen_socket = vice_network_server(server_addr);
         if (!listen_socket) {
+            DBG(("vice_network_address_generate failed, can not start server."));
             break;
         }
 
-        /* Set proper settings */
+        /* Setup strict event safe values for the resources that need it */
         if (resources_set_event_safe() < 0) {
             ui_error("Warning! Failed to set netplay-safe settings.");
         }
@@ -668,10 +737,16 @@ int network_start_server(void)
         network_mode = NETWORK_SERVER;
 
         vsync_suspend_speed_eval();
-        ui_display_statustext("Server is waiting for a client...", 1);
+        sound_suspend();
+
+        ui_display_statustext("Server is waiting for a client...", false);
 
         ret = 0;
     } while (0);
+
+    if (network_mode == NETWORK_SERVER_CONNECTED) {
+        ui_display_statustext("Client connected...", true);
+    }
 
     if (server_addr) {
         vice_network_address_close(server_addr);
@@ -688,6 +763,8 @@ int network_connect_client(void)
     uint8_t *buf;
     uint8_t recv_buf4[4];
     size_t buf_size;
+
+    DBG(("network_connect_client (network_mode is: %u)", network_mode));
 
     if (network_mode != NETWORK_IDLE) {
         return -1;
@@ -719,7 +796,7 @@ int network_connect_client(void)
         return -1;
     }
 
-    ui_display_statustext("Receiving snapshot from server...", 0);
+    ui_display_statustext("Receiving snapshot from server...", false);
     if (network_recv_buffer(network_socket, recv_buf4, 4) < 0) {
         lib_free(snapshotfilename);
         vice_network_socket_close(network_socket);
@@ -736,7 +813,7 @@ int network_connect_client(void)
     }
 
     if (fwrite(buf, 1, buf_size, f) == 0) {
-        log_debug("network_connect_client write failed.");
+        log_debug(LOG_DEFAULT, "network_connect_client write failed.");
     }
     fclose(f);
     lib_free(buf);
@@ -749,6 +826,7 @@ int network_connect_client(void)
 
 void network_disconnect(void)
 {
+    DBG(("network_disconnect (network_mode was:%u)", network_mode));
     vice_network_socket_close(network_socket);
     if (network_mode == NETWORK_SERVER_CONNECTED) {
         network_mode = NETWORK_SERVER;
@@ -756,6 +834,7 @@ void network_disconnect(void)
         vice_network_socket_close(listen_socket);
         network_mode = NETWORK_IDLE;
     }
+    ui_display_statustext("Netplay disconnected...", true);
 }
 
 void network_suspend(void)
@@ -771,7 +850,7 @@ void network_suspend(void)
     suspended = 1;
 }
 
-#ifdef NETWORK_DEBUG
+#ifdef NETWORK_TRAFFIC_DEBUG
 long t1, t2, t3, t4;
 #endif
 
@@ -781,22 +860,26 @@ static void network_hook_connected_send(void)
     unsigned int send_len;
     uint8_t send_len4[4];
 
+    DBGT(("network_hook_connected_send"));
+
     /* create and send current event buffer */
     network_event_record(EVENT_LIST_END, NULL, 0);
     send_len = network_create_event_buffer(&local_event_buf, &(frame_event_list[current_frame]));
 
-#ifdef NETWORK_DEBUG
-    t1 = vsyncarch_gettime();
+#ifdef NETWORK_TRAFFIC_DEBUG
+    t1 = tick_now();
 #endif
 
     util_int_to_le_buf4(send_len4, (int)send_len);
-    if (network_send_buffer(network_socket, send_len4, 4) < 0
-        || network_send_buffer(network_socket, local_event_buf, send_len) < 0) {
-        ui_display_statustext("Remote host disconnected.", 1);
+    if (network_send_buffer(network_socket, send_len4, 4) < 0) {
+        ui_display_statustext("Remote host disconnected.", true);
+        network_disconnect();
+    } else if (network_send_buffer(network_socket, local_event_buf, send_len) < 0) {
+        ui_display_statustext("Remote host disconnected.", true);
         network_disconnect();
     }
-#ifdef NETWORK_DEBUG
-    t2 = vsyncarch_gettime();
+#ifdef NETWORK_TRAFFIC_DEBUG
+    t2 = tick_now_after(t1);
 #endif
 
     lib_free(local_event_buf);
@@ -810,6 +893,8 @@ static void network_hook_connected_receive(void)
     event_list_state_t *remote_event_list;
     event_list_state_t *client_event_list, *server_event_list;
 
+    DBGT(("network_hook_connected_receive"));
+
     suspended = 0;
 
     if (current_frame == frame_delta - 1) {
@@ -819,7 +904,7 @@ static void network_hook_connected_receive(void)
     if (frame_buffer_full) {
         do {
             if (network_recv_buffer(network_socket, recv_len4, 4) < 0) {
-                ui_display_statustext("Remote host disconnected.", 1);
+                ui_display_statustext("Remote host disconnected.", true);
                 network_disconnect();
                 return;
             }
@@ -827,14 +912,14 @@ static void network_hook_connected_receive(void)
             recv_len = util_le_buf4_to_int(recv_len4);
             if (recv_len == 0 && suspended == 0) {
                 /* remote host suspended emulation */
-                ui_display_statustext("Remote host suspending...", 0);
+                ui_display_statustext("Remote host suspending...", false);
                 suspended = 1;
                 vsync_suspend_speed_eval();
             }
         } while (recv_len == 0);
 
         if (suspended == 1) {
-            ui_display_statustext("", 0);
+            ui_display_statustext("", false);
         }
 
         remote_event_buf = lib_malloc(recv_len);
@@ -845,8 +930,8 @@ static void network_hook_connected_receive(void)
             return;
         }
 
-#ifdef NETWORK_DEBUG
-        t3 = vsyncarch_gettime();
+#ifdef NETWORK_TRAFFIC_DEBUG
+        t3 = tick_now_after(t2);
 #endif
 
         remote_event_list = network_create_event_list(remote_event_buf);
@@ -884,8 +969,8 @@ static void network_hook_connected_receive(void)
         lib_free(remote_event_list);
     }
     network_prepare_next_frame();
-#ifdef NETWORK_DEBUG
-    t4 = vsyncarch_gettime();
+#ifdef NETWORK_TRAFFIC_DEBUG
+    t4 = tick_now_after(t3);
 #endif
 }
 
@@ -909,10 +994,8 @@ void network_hook(void)
     if (network_connected()) {
         network_hook_connected_send();
         network_hook_connected_receive();
-#ifdef NETWORK_DEBUG
-        log_debug("network_hook timing: %5ld %5ld %5ld; total: %5ld",
-                  t2 - t1, t3 - t2, t4 - t3, t4 - t1);
-#endif
+        DBGT(("network_hook timing: %5ld %5ld %5ld; total: %5ld",
+                  t2 - t1, t3 - t2, t4 - t3, t4 - t1));
     }
 }
 
@@ -951,16 +1034,19 @@ int network_connected(void)
 
 int network_start_server(void)
 {
+    DBG(("network_start_server (disabled)"));
     return 0;
 }
 
 int network_connect_client(void)
 {
+    DBG(("network_connect_client (disabled)"));
     return 0;
 }
 
 void network_disconnect(void)
 {
+    DBG(("network_disconnect (disabled)"));
 }
 
 void network_suspend(void)

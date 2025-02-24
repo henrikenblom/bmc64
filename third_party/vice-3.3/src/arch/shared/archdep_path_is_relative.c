@@ -32,7 +32,7 @@
 #include <string.h>
 #include <ctype.h>
 
-#include "archdep_atexit.h"
+#include "archdep_exit.h"
 #include "log.h"
 
 #include "archdep_path_is_relative.h"
@@ -42,7 +42,7 @@
  *
  * \param[in]   path    pathname
  *
- * \return  bool
+ * \return  non-0 if \a path is relative
  */
 int archdep_path_is_relative(const char *path)
 {
@@ -50,21 +50,19 @@ int archdep_path_is_relative(const char *path)
         return 1;   /* yup, */
     }
 
-#if defined(AMIGA_SUPPORT)
-    return strchr(path, ':') == NULL;
-#elif defined(UNIX_COMPILE) || defined(BEOS_COMPILE)
+#if defined(UNIX_COMPILE) || defined(BEOS_COMPILE)
     return *path != '/';
-#elif defined(WIN32_COMPILE) || defined(OS2_COMPILE)
+#elif defined(WINDOWS_COMPILE)
     if (*path == '\\' || *path == '/') {
         return 0;
     }
-    if (isalpha(path[0]) && path[1] == ':' &&
+    if (isalpha((unsigned char)path[0]) && path[1] == ':' &&
             (path[2] == '\\' || path[2] == '/')) {
         return 0;
     }
     return 1;
 #else
-    log_error(LOG_ERR, "system not supported.");
+    log_error(LOG_DEFAULT, "system not supported.");
     archdep_vice_exit(1);
 #endif
 }

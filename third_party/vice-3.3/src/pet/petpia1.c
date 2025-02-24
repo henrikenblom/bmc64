@@ -45,6 +45,7 @@
 #include "resources.h"
 #include "tapeport.h"
 #include "types.h"
+#include "userport.h"
 
 /* ------------------------------------------------------------------------- */
 /* Renaming exported functions */
@@ -66,9 +67,9 @@ static piareg mypia;
 /* ------------------------------------------------------------------------- */
 /* CPU binding */
 
-static void my_set_int(unsigned int pia_int_num, int a)
+static void my_set_int(unsigned int pia_int_num, int a, CLOCK offset)
 {
-    maincpu_set_irq(pia_int_num, a ? IK_IRQ : IK_NONE);
+    maincpu_set_irq_clk(pia_int_num, a ? IK_IRQ : IK_NONE, maincpu_clk - offset);
 }
 
 static void my_restore_int(unsigned int pia_int_num, int a)
@@ -84,19 +85,10 @@ static void my_restore_int(unsigned int pia_int_num, int a)
 /* ------------------------------------------------------------------------- */
 /* PIA resources.  */
 
-/* Flag: is the diagnostic pin enabled?  */
+/* Flag: is the diagnostic pin enabled? (read only!) */
 static int diagnostic_pin_enabled;
 
-static int set_diagnostic_pin_enabled(int val, void *param)
-{
-    diagnostic_pin_enabled = val ? 1 : 0;
-
-    return 0;
-}
-
 static const resource_int_t resources_int[] = {
-    { "DiagPin", 0, RES_EVENT_SAME, NULL,
-      &diagnostic_pin_enabled, set_diagnostic_pin_enabled, NULL },
     RESOURCE_INT_LIST_END
 };
 
@@ -108,12 +100,6 @@ int pia1_resources_init(void)
 
 static const cmdline_option_t cmdline_options[] =
 {
-    { "-diagpin", SET_RESOURCE, CMDLINE_ATTRIB_NONE,
-      NULL, NULL, "DiagPin", (resource_value_t)1,
-      NULL, "Enable userport diagnostic pin" },
-    { "+diagpin", SET_RESOURCE, CMDLINE_ATTRIB_NONE,
-      NULL, NULL, "DiagPin", (resource_value_t)1,
-      NULL, "Disable userport diagnostic pin" },
     CMDLINE_LIST_END
 };
 
@@ -126,24 +112,59 @@ static int tape1_sense = 0;
 static int tape1_write_in = 0;
 static int tape1_motor_in = 0;
 
+static int tape2_sense = 0;
+static int tape2_write_in = 0;
+static int tape2_motor_in = 0;
+
 static int old_cb2_status = 0xff;
 
-void pia1_set_tape_sense(int v)
+void pia1_set_tape1_sense(int v)
 {
     tape1_sense = v;
 }
 
+void pia1_set_tape2_sense(int v)
+{
+    tape2_sense = v;
+}
+
 /* FIXME: find out how the pet can read the write and motor lines */
 
-void pia1_set_tape_write_in(int v)
+void pia1_set_tape1_write_in(int v)
 {
     tape1_write_in = v;
 }
 
-void pia1_set_tape_motor_in(int v)
+void pia1_set_tape2_write_in(int v)
+{
+    tape2_write_in = v;
+}
+
+void pia1_set_tape1_motor_in(int v)
 {
     tape1_motor_in = v;
 }
+
+void pia1_set_tape2_motor_in(int v)
+{
+    tape2_motor_in = v;
+}
+
+/** \brief  Get diagnostic pin status
+ *
+ * Get "DiagPin" resource value without going through the resource interface.
+ *
+ * The Gtk3 status bar code runs each frame, so going through the resource
+ * interface and thus obtaining and releasing the main lock is too expensive.
+ * This function avoids that performance hit.
+ *
+ * \return  state of DiagPin resource (only for display)
+ */
+bool pia1_get_diagnostic_pin(void)
+{
+    return (bool)diagnostic_pin_enabled;
+}
+
 
 /* ------------------------------------------------------------------------- */
 /* I/O */
@@ -151,7 +172,7 @@ void pia1_set_tape_motor_in(int v)
 static void pia_set_ca2(int a)
 {
     parallel_cpu_set_eoi((uint8_t)((a) ? 0 : 1));
-    if (petres.pet2k) {
+    if (petres.model.pet2k) {
         crtc_screen_enable((a) ? 1 : 0);
     }
 }
@@ -159,7 +180,7 @@ static void pia_set_ca2(int a)
 static void pia_set_cb2(int a)
 {
     if (old_cb2_status != a) {
-        tapeport_set_motor(!a);
+        tapeport_set_motor(TAPEPORT_PORT_1, !a);
         old_cb2_status = a;
     }
 }
@@ -201,7 +222,8 @@ E813    CB2         output to cassette #1 motor: 0=on, 1=off
 
 static void store_pa(uint8_t byte)
 {
-    tapeport_set_sense_out(byte & 16 ? 1 : 0);
+    tapeport_set_sense_out(TAPEPORT_PORT_1, byte & 16 ? 1 : 0);
+    tapeport_set_sense_out(TAPEPORT_PORT_2, byte & 32 ? 1 : 0);
 }
 
 static void store_pb(uint8_t byte)
@@ -222,8 +244,12 @@ static uint8_t read_pa(void)
 
     drive_cpu_execute_all(maincpu_clk);
 
+    diagnostic_pin_enabled = read_userport_sp1(0);  /* pin 5 */
+    /*printf("diag:%d\n", diagnostic_pin_enabled);*/
+
     byte = 0xff
            - (tape1_sense ? 16 : 0)
+           - (tape2_sense ? 32 : 0)
            - (parallel_eoi ? 64 : 0)
            - ((diagnostic_pin_enabled || petmem_superpet_diag()) ? 128 : 0);
     byte = ((byte & ~mypia.ddr_a) | (mypia.port_a & mypia.ddr_a));

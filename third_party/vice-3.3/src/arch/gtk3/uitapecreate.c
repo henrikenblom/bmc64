@@ -30,7 +30,6 @@
 
 #include "basewidgets.h"
 #include "basedialogs.h"
-#include "debug_gtk3.h"
 #include "widgethelpers.h"
 #include "filechooserhelpers.h"
 #include "util.h"
@@ -41,12 +40,14 @@
 #include "resources.h"
 #include "tape.h"
 #include "ui.h"
+#include "uiapi.h"
+#include "uiactions.h"
 
 #include "uitapecreate.h"
 
 
 /* forward declarations of functions */
-static gboolean create_tape_image(const char *filename);
+static gboolean create_tape_image(GtkWindow *parent, const char *filename, int port);
 
 
 /** \brief  Reference to the 'auto-attach' check button
@@ -54,39 +55,58 @@ static gboolean create_tape_image(const char *filename);
 static GtkWidget *auto_attach = NULL;
 
 
+/** \brief  Handler for the 'destroy' event of the dialog
+ *
+ * \param[in]   dialog  dialog (unused)
+ * \param[in]   port    port number
+ */
+static void on_destroy(GtkWidget *dialog, gpointer port)
+{
+    if (GPOINTER_TO_INT(port) == 1) {
+        ui_action_finish(ACTION_TAPE_CREATE_1);
+    } else {
+        ui_action_finish(ACTION_TAPE_CREATE_2);
+    }
+}
+
+
 /** \brief  Handler for 'response' event of the dialog
  *
  * This handler is called when the user clicks a button in the dialog.
  *
- * \param[in]   widget      the dialog
+ * \param[in]   dialog      the dialog
  * \param[in]   response_id response ID
- * \param[in]   data        extra data (unused)
+ * \param[in]   data        port number (integer, 1 or 2)
  */
-static void on_response(GtkWidget *widget, gint response_id, gpointer data)
+static void on_response(GtkDialog *dialog, gint response_id, gpointer data)
 {
-    gchar *filename;
-    int status = TRUE;
+    gchar    *filename;
+    gboolean  status = TRUE;
+    int       port = GPOINTER_TO_INT(data);
 
     switch (response_id) {
 
         case GTK_RESPONSE_ACCEPT:
-            filename = gtk_file_chooser_get_filename(GTK_FILE_CHOOSER(widget));
+            filename = gtk_file_chooser_get_filename(GTK_FILE_CHOOSER(dialog));
             if (filename != NULL) {
+                gchar *filename_locale = file_chooser_convert_to_locale(filename);
+
                 /* create tape */
-                status = create_tape_image(filename);
+                status = create_tape_image(GTK_WINDOW(dialog), filename_locale, port);
+                g_free(filename_locale);
             }
             g_free(filename);
             if (status) {
                 /* image creation and attaching was succesful, exit dialog */
-                gtk_widget_destroy(widget);
+                gtk_widget_destroy(GTK_WIDGET(dialog));
             }
             break;
 
         case GTK_RESPONSE_REJECT:
-            gtk_widget_destroy(widget);
+            gtk_widget_destroy(GTK_WIDGET(dialog));
             break;
+
         default:
-            debug_gtk3("warning: unhandled response ID %d\n", response_id);
             break;
     }
 }
@@ -94,28 +114,35 @@ static void on_response(GtkWidget *widget, gint response_id, gpointer data)
 
 /** \brief  Actually create the tape image and attach it
  *
+ * \param[in]   parent      parent dialog
  * \param[in]   filename    filename of the new image
+ * \param[in]   port        datasette port number (1 or 2)
  *
  * \return  bool
  */
-static gboolean create_tape_image(const char *filename)
+static gboolean create_tape_image(GtkWindow  *parent,
+                                  const char *filename,
+                                  int         port)
 {
-    gboolean status = TRUE;
-    char *fname_copy;
+    char     *fname_copy;
+    gboolean  status = TRUE;
 
     /* fix extension */
     fname_copy = util_add_extension_const(filename, "tap");
 
     /* try to create the image */
     if (cbmimage_create_image(fname_copy, DISK_IMAGE_TYPE_TAP) < 0) {
-        vice_gtk3_message_error("VICE error",
-                "Failed to create tape image '%s'", fname_copy);
+        vice_gtk3_message_error(parent,
+                                "VICE error",
+                                "Failed to create tape image '%s'",
+                                fname_copy);
         status = FALSE;
     } else if (gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(auto_attach))) {
         /* try to attach the image */
-        if (tape_image_attach(1, fname_copy) < 0) {
-            vice_gtk3_message_error("VICE error",
-                    "Failed to attach tape image '%s'", fname_copy);
+        if (tape_image_attach(port, fname_copy) < 0) {
+            vice_gtk3_message_error(parent,
+                                    "Failed to attach tape image '%s' to port #%d",
+                                    fname_copy, port);
             status = FALSE;
         }
     }
@@ -135,7 +162,8 @@ static GtkWidget *create_extra_widget(void)
 
     /* create a grid with some spacing and margins */
     grid = vice_gtk3_grid_new_spaced(VICE_GTK3_DEFAULT, VICE_GTK3_DEFAULT);
-    g_object_set(grid, "margin-left", 16, "margin-right", 16, NULL);
+    gtk_widget_set_margin_start(grid, 16);
+    gtk_widget_set_margin_end(grid, 16);
 
     auto_attach = gtk_check_button_new_with_label("Auto-attach tape image");
     gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(auto_attach), TRUE);
@@ -148,11 +176,11 @@ static GtkWidget *create_extra_widget(void)
 
 /** \brief  Create and show 'attach new tape image' dialog
  *
- * \param[in]   parent  parent widget (ignored)
- * \param[in]   data    extra data (ignored)
+ * \param[in]   port    port number (1 or 2)
  *
+ * \return  TRUE
  */
-void uitapecreate_dialog_show(GtkWidget *parent, gpointer data)
+void ui_tape_create_dialog_show(int port)
 {
     GtkWidget *dialog;
     GtkFileFilter *filter;
@@ -177,7 +205,14 @@ void uitapecreate_dialog_show(GtkWidget *parent, gpointer data)
     gtk_file_filter_add_pattern(filter, "*.tap");
     gtk_file_chooser_add_filter(GTK_FILE_CHOOSER(dialog), filter);
 
-    g_signal_connect(dialog, "response", G_CALLBACK(on_response), NULL);
+    g_signal_connect(dialog,
+                     "response",
+                     G_CALLBACK(on_response),
+                     GINT_TO_POINTER(port));
+    g_signal_connect(dialog,
+                     "destroy",
+                     G_CALLBACK(on_destroy),
+                     GINT_TO_POINTER(port));
 
     gtk_widget_show(dialog);
 }

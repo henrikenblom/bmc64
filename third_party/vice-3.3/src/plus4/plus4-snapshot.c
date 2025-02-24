@@ -28,17 +28,17 @@
 
 #include <stdio.h>
 
+#include "archdep.h"
 #include "drive-snapshot.h"
 #include "drive.h"
-#include "ioutil.h"
 #include "joyport.h"
 #include "joystick.h"
 #include "keyboard.h"
 #include "log.h"
 #include "machine.h"
 #include "maincpu.h"
-#include "plus4-snapshot.h"
 #include "plus4memsnapshot.h"
+#include "serial.h"
 #include "snapshot.h"
 #include "sound.h"
 #include "tapeport.h"
@@ -47,16 +47,19 @@
 #include "userport.h"
 #include "vice-event.h"
 
+#include "plus4-snapshot.h"
+
+
 /* #define DEBUGSNAPSHOT */
 
 #ifdef DEBUGSNAPSHOT
-#define DBG(x) printf x
+#define DBG(x) log_printf x
 #else
 #define DBG(x)
 #endif
 
-#define SNAP_MAJOR 1
-#define SNAP_MINOR 1
+#define SNAP_MAJOR 2
+#define SNAP_MINOR 0
 
 int plus4_snapshot_write(const char *name, int save_roms, int save_disks,
                          int event_mode)
@@ -77,6 +80,7 @@ int plus4_snapshot_write(const char *name, int save_roms, int save_disks,
     if (maincpu_snapshot_write_module(s) < 0
         || plus4_snapshot_write_module(s, save_roms) < 0
         || drive_snapshot_write_module(s, save_disks, save_roms) < 0
+        || fsdrive_snapshot_write_module(s) < 0
         || ted_snapshot_write_module(s) < 0
         || event_snapshot_write_module(s, event_mode) < 0
         || tapeport_snapshot_write_module(s, save_disks) < 0
@@ -85,11 +89,11 @@ int plus4_snapshot_write(const char *name, int save_roms, int save_disks,
         || joyport_snapshot_write_module(s, JOYPORT_2) < 0
         || userport_snapshot_write_module(s) < 0) {
         snapshot_close(s);
-        ioutil_remove(name);
-        DBG(("error writing snapshot modules.\n"));
+        archdep_remove(name);
+        DBG(("error writing snapshot modules."));
         return -1;
     }
-    DBG(("all snapshots written.\n"));
+    DBG(("all snapshots written."));
     snapshot_close(s);
     return 0;
 }
@@ -105,7 +109,7 @@ int plus4_snapshot_read(const char *name, int event_mode)
         return -1;
     }
 
-    if (major != SNAP_MAJOR || minor != SNAP_MINOR) {
+    if (!snapshot_version_is_equal(major, minor, SNAP_MAJOR, SNAP_MINOR)) {
         log_error(LOG_DEFAULT, "Snapshot version (%d.%d) not valid: expecting %d.%d.", major, minor, SNAP_MAJOR, SNAP_MINOR);
         snapshot_set_error(SNAPSHOT_MODULE_INCOMPATIBLE);
         goto fail;
@@ -118,6 +122,7 @@ int plus4_snapshot_read(const char *name, int event_mode)
     if (maincpu_snapshot_read_module(s) < 0
         || plus4_snapshot_read_module(s) < 0
         || drive_snapshot_read_module(s) < 0
+        || fsdrive_snapshot_read_module(s) < 0
         || ted_snapshot_read_module(s) < 0
         || event_snapshot_read_module(s, event_mode) < 0
         || tapeport_snapshot_read_module(s) < 0
@@ -132,7 +137,7 @@ int plus4_snapshot_read(const char *name, int event_mode)
 
     sound_snapshot_finish();
 
-    DBG(("all snapshots loaded.\n"));
+    DBG(("all snapshots loaded."));
     return 0;
 
 fail:
@@ -140,8 +145,8 @@ fail:
         snapshot_close(s);
     }
 
-    machine_trigger_reset(MACHINE_RESET_MODE_SOFT);
+    machine_trigger_reset(MACHINE_RESET_MODE_RESET_CPU);
 
-    DBG(("error loading snapshot modules.\n"));
+    DBG(("error loading snapshot modules."));
     return -1;
 }

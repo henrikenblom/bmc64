@@ -30,11 +30,11 @@
 #include "vice.h"
 
 #include "plus4acia.h"
+#include "userport.h"
 
 #define mycpu           maincpu
 #define myclk           maincpu_clk
 #define mycpu_rmw_flag  maincpu_rmw_flag
-#define mycpu_clk_guard maincpu_clk_guard
 
 #define myacia acia
 
@@ -83,19 +83,38 @@ static int _acia_enabled = 0;
 
 /* ------------------------------------------------------------------------- */
 
+static void wrap_acia_store(uint16_t addr, uint8_t value)
+{
+    if ((addr & 3) == 2) {
+        /* ACIA command register:
+           bits 2,3 control RTS
+           0, 0 -> RTS high
+           any other -> RTS low
+        */
+        if ((value & 0x0c) == 0) {
+            store_userport_pa2(1); /* Userport pin D */
+        } else {
+            store_userport_pa2(0); /* Userport pin D */
+        }
+    }
+    acia_store(addr, value);
+}
+
 static io_source_t acia_device = {
-    "ACIA",
-    IO_DETACH_CART, /* dummy */
-    NULL,           /* dummy */
-    0xfd00, 0xfd0f, 3,
-    1, /* read is always valid */
-    acia_store,
-    acia_read,
-    acia_peek,
-    NULL, /* TODO: dump */
-    0, /* dummy (not a cartridge) */
-    IO_PRIO_NORMAL,
-    0
+    "ACIA",               /* name of the device */
+    IO_DETACH_RESOURCE,   /* use resource to detach the device when involved in a read-collision */
+    "Acia1Enable",        /* resource to set to '0' */
+    0xfd00, 0xfd0f, 0x03, /* range for the device, regs:$fd00-$fd03, mirrors:$df04-$fd0f */
+    1,                    /* read is always valid */
+    wrap_acia_store,      /* store function */
+    NULL,                 /* NO poke function */
+    acia_read,            /* read function */
+    acia_peek,            /* peek function */
+    acia_dump,            /* device state information dump function */
+    IO_CART_ID_NONE,      /* not a cartridge */
+    IO_PRIO_NORMAL,       /* normal priority, device read needs to be checked for collisions */
+    0,                    /* insertion order, gets filled in by the registration function */
+    IO_MIRROR_NONE        /* NO mirroring */
 };
 
 static io_source_list_t *acia_list_item = NULL;
@@ -130,6 +149,7 @@ static int set_acia_enabled(int value, void *param)
             return -1;
         }
         _acia_enabled = 1;
+        acia_reset();
     } else if ((!val) && (_acia_enabled)) {
         acia_disable();
         _acia_enabled = 0;

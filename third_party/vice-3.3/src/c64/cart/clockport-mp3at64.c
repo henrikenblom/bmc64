@@ -39,6 +39,7 @@
 #ifdef MP3AT64_DEBUG
 #include "log.h"
 #endif
+#include "monitor.h"
 #include "sound.h"
 #include "types.h"
 #include "uiapi.h"
@@ -69,7 +70,7 @@ static int mp3_input_rate = 44100;
 static int mp3_input_channels = 1;
 static int mp3_input_pointer = 0;
 static int mp3_input_frame_size = 0;
-static int mp3_input_frame_mpeg_version = 0; 
+static int mp3_input_frame_mpeg_version = 0;
 static int mp3_input_frame_layer = 3;
 static int mp3_protection = 0;
 static int mp3_input_bitrate = 0;
@@ -144,6 +145,27 @@ static void mp3at64_reset(void)
     mp3_input_data_state = MP3_INPUT_STATE_IDLE;
 }
 
+#ifdef SOUND_SYSTEM_FLOAT
+static float mp3_get_current_sample(void)
+{
+    int16_t retval = 0;
+    int i;
+
+    if (mp3_output_buffers_size[0]) {
+        retval = mp3_output_buffers[0][mp3_output_sample_pos++];
+        if (mp3_output_sample_pos >= mp3_output_buffers_size[0]) {
+            lib_free(mp3_output_buffers[0]);
+            for (i = 1; i < MP3_BUFFERS; ++i) {
+                mp3_output_buffers[i - 1] = mp3_output_buffers[i];
+                mp3_output_buffers_size[i - 1] = mp3_output_buffers_size[i];
+            }
+            mp3_output_buffers[MP3_BUFFERS - 1] = NULL;
+            mp3_output_buffers_size[MP3_BUFFERS - 1] = 0;
+        }
+    }
+    return retval / 32767.0;
+}
+#else
 static int16_t mp3_get_current_sample(void)
 {
     int16_t retval = 0;
@@ -163,14 +185,20 @@ static int16_t mp3_get_current_sample(void)
     }
     return retval;
 }
+#endif
 
 /* ------------------------------------------------------------------------- */
 
 /* Some prototypes are needed */
 static int clockport_mp3at64_sound_machine_init(sound_t *psid, int speed, int cycles_per_sec);
-static int clockport_mp3at64_sound_machine_calculate_samples(sound_t **psid, int16_t *pbuf, int nr, int sound_output_channels, int sound_chip_channels, int *delta_t);
 static void clockport_mp3at64_sound_reset(sound_t *psid, CLOCK cpu_clk);
 static void clockport_mp3at64_sound_machine_close(sound_t *psid);
+
+#ifdef SOUND_SYSTEM_FLOAT
+static int clockport_mp3at64_sound_machine_calculate_samples(sound_t **psid, float *pbuf, int nr, int sound_chip_channels, CLOCK *delta_t);
+#else
+static int clockport_mp3at64_sound_machine_calculate_samples(sound_t **psid, int16_t *pbuf, int nr, int sound_output_channels, int sound_chip_channels, CLOCK *delta_t);
+#endif
 
 static int clockport_mp3at64_sound_machine_cycle_based(void)
 {
@@ -182,17 +210,31 @@ static int clockport_mp3at64_sound_machine_channels(void)
     return 1;
 }
 
+#ifdef SOUND_SYSTEM_FLOAT
+/* stereo mixing placement of the ClockPort MP3@64 sound */
+static sound_chip_mixing_spec_t *clockport_mp3at64_sound_mixing_spec[SOUND_CHIP_CHANNELS_MAX] = {
+    {
+        100, /* left channel volume % in case of stereo output, default output to both */
+        100  /* right channel volume % in case of stereo output, default output to both */
+    }
+};
+#endif
+
+/* ClockPort MP3@64 sound chip */
 static sound_chip_t clockport_mp3at64_sound_chip = {
-    NULL, /* no open */
-    clockport_mp3at64_sound_machine_init,
-    clockport_mp3at64_sound_machine_close,
-    clockport_mp3at64_sound_machine_calculate_samples,
-    NULL, /* no store */
-    NULL, /* no read */
-    clockport_mp3at64_sound_reset,
-    clockport_mp3at64_sound_machine_cycle_based,
-    clockport_mp3at64_sound_machine_channels,
-    0 /* chip enabled */
+    NULL,                                              /* NO sound chip open function */
+    clockport_mp3at64_sound_machine_init,              /* sound chip init function */
+    clockport_mp3at64_sound_machine_close,             /* sound chip close function */
+    clockport_mp3at64_sound_machine_calculate_samples, /* sound chip calculate samples function */
+    NULL,                                              /* NO sound chip store function */
+    NULL,                                              /* NO sound chip read function */
+    clockport_mp3at64_sound_reset,                     /* sound chip reset function */
+    clockport_mp3at64_sound_machine_cycle_based,       /* sound chip 'is_cycle_based()' function, sound chip is NOT cycle based */
+    clockport_mp3at64_sound_machine_channels,          /* sound chip 'get_amount_of_channels()' function, sound chip has 1 channel */
+#ifdef SOUND_SYSTEM_FLOAT
+    clockport_mp3at64_sound_mixing_spec,               /* stereo mixing placement specs */
+#endif
+    0                                                  /* chip enabled, toggled when sound chip is (de-)activated */
 };
 
 static uint16_t clockport_mp3at64_sound_chip_offset = 0;
@@ -236,7 +278,21 @@ static void clockport_mp3at64_sound_machine_close(sound_t *psid)
     }
 }
 
-static int clockport_mp3at64_sound_machine_calculate_samples(sound_t **psid, int16_t *pbuf, int nr, int soc, int scc, int *delta_t)
+#ifdef SOUND_SYSTEM_FLOAT
+/* FIXME */
+static int clockport_mp3at64_sound_machine_calculate_samples(sound_t **psid, float *pbuf, int nr, int scc, CLOCK *delta_t)
+{
+    int i;
+    float sample;
+
+    for (i = 0; i < nr; ++i) {
+        sample = mp3_get_current_sample();
+        pbuf[i] = sample;
+    }
+    return nr;
+}
+#else
+static int clockport_mp3at64_sound_machine_calculate_samples(sound_t **psid, int16_t *pbuf, int nr, int soc, int scc, CLOCK *delta_t)
 {
     int i;
     int16_t sample;
@@ -244,11 +300,11 @@ static int clockport_mp3at64_sound_machine_calculate_samples(sound_t **psid, int
     for (i = 0; i < nr; ++i) {
         switch (soc) {
             default:
-            case 1:
+            case SOUND_OUTPUT_MONO:
                 sample = sound_audio_mix(mp3_get_current_sample(), mp3_get_current_sample());
                 pbuf[i] = sound_audio_mix(pbuf[i], sample);
                 break;
-           case 2:
+           case SOUND_OUTPUT_STEREO:
                 pbuf[i * 2] = sound_audio_mix(pbuf[i * 2], mp3_get_current_sample());
                 pbuf[(i * 2) + 1] = sound_audio_mix(pbuf[i], mp3_get_current_sample());
                 break;
@@ -256,6 +312,7 @@ static int clockport_mp3at64_sound_machine_calculate_samples(sound_t **psid, int
     }
     return nr;
 }
+#endif
 
 static void clockport_mp3at64_sound_reset(sound_t *psid, CLOCK cpu_clk)
 {
@@ -288,13 +345,13 @@ static uint8_t mp3at64_read_i2c_clock(void)
 
 /* ------------------------------------------------------------------------- */
 
-static int mp3_sampling_rates[4][3] = {
+static const int mp3_sampling_rates[4][3] = {
     { 44100, 22050, 11025 },
     { 48000, 24000, 12000 },
     { 32000, 16000,  8000 }
 };
 
-static int mp3_bitrates[16][3][3] = {
+static const int mp3_bitrates[16][3][3] = {
     { {  0,    0,   0 }, {   0,   0,   0 }, {   0,   0,   0 } },
     { {  32,  32,  32 }, {  32,   8,   8 }, {  32,   8,   8 } },
     { {  64,  48,  40 }, {  48,  16,  16 }, {  48,  16,  16 } },
@@ -313,13 +370,13 @@ static int mp3_bitrates[16][3][3] = {
     { {   0,   0,   0 }, {   0,   0,   0 }, {   0,   0,   0 } }
 };
 
-static int mp3_slot_sizes[3] = {
+static const int mp3_slot_sizes[3] = {
     4,
     1,
     1
 };
 
-static int mp3_sampels_per_frame[3][3] = {
+static const int mp3_sampels_per_frame[3][3] = {
     { 384, 1152, 1152 },
     { 384, 1152,  576 },
     { 384, 1152,  576 }
@@ -607,7 +664,7 @@ static void mp3at64_store_mp3_data(uint8_t val)
                                 ret = mpg123_decode(mh, mp3_frame_buffer, mp3_input_frame_size, (unsigned char *)buffer, MP3_MAX_SAMPLES_PER_FRAME * 2, &size);
                                 if (ret != MPG123_ERR && ret != MPG123_NEED_MORE) {
                                     mp3_output_buffers[block] = buffer;
-                                    mp3_output_buffers_size[block] = size / 2;
+                                    mp3_output_buffers_size[block] = (int)(size / 2);
                                     if (mp3_get_channels() != 2) {
                                         mp3_mono_to_stereo(block);
                                     }
@@ -695,6 +752,8 @@ static void clockport_mp3at64_reset(void *context)
 static int clockport_mp3at64_dump(void *context)
 {
     /* TODO */
+    /* FIXME: this is incomplete */
+    mon_out("mp3 status: $%02x\n", mp3at64_read_mp3_status());
     return 0;
 }
 
@@ -721,7 +780,7 @@ void clockport_mp3at64_shutdown(void)
     mp3at64_reset();
 }
 
-clockport_device_t *clockport_mp3at64_open_device(char *owner)
+clockport_device_t *clockport_mp3at64_open_device(const char *owner)
 {
     clockport_device_t *retval = NULL;
     if (clockport_mp3at64_sound_chip.chip_enabled) {

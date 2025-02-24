@@ -35,6 +35,8 @@
 #include "debug.h"
 #include "types.h"
 #include "vicii-chip-model.h"
+#include "vicii-colorram.h"
+#include "vicii-draw-cycle.h"
 #include "vicii-fetch.h"
 #include "vicii-irq.h"
 #include "vicii-resources.h"
@@ -44,7 +46,7 @@
 
 
 /* Unused bits in VIC-II registers: these are always 1 when read.  */
-static int unused_bits_in_registers[0x40] =
+static const uint8_t unused_bits_in_registers[0x40] =
 {
     0x00 /* $D000 */, 0x00 /* $D001 */, 0x00 /* $D002 */, 0x00 /* $D003 */,
     0x00 /* $D004 */, 0x00 /* $D005 */, 0x00 /* $D006 */, 0x00 /* $D007 */,
@@ -475,6 +477,16 @@ void vicii_store(uint16_t addr, uint8_t value)
     }
 }
 
+/* used by monitor when sfx off */
+void vicii_poke(uint16_t addr, uint8_t value)
+{
+    addr &= 0x3f;
+    if ((addr >= 0x20) && (addr <= 0x2e)) {
+        vicii_monitor_colreg_store(addr, value);
+        return;
+    }
+    vicii_store(addr, value);
+}
 
 /* Helper function for reading from $D011/$D012.  */
 inline static unsigned int read_raster_y(void)
@@ -755,4 +767,9 @@ uint8_t vicii_peek(uint16_t addr)
         default:
             return vicii.regs[addr] | unused_bits_in_registers[addr];
     }
+}
+
+void vicii_init_colorram(uint8_t *colorram)
+{
+    memcpy(colorram, colorram_data, 0x400);
 }

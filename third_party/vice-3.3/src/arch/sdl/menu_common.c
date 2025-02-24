@@ -37,6 +37,7 @@
 #include "archdep.h"
 #include "autostart.h"
 #include "lib.h"
+#include "log.h"
 #include "menu_common.h"
 #include "monitor.h"
 #include "resources.h"
@@ -70,9 +71,37 @@ UI_MENU_CALLBACK(submenu_radio_callback)
     ui_menu_entry_t *item = (ui_menu_entry_t *)param;
 
     while (item->string != NULL) {
-        if (item->callback(0, item->data) != NULL) {
-            src = item->string;
-            break;
+        if (item->callback != NULL) {
+            if (item->callback(0, item->data) != NULL) {
+                src = item->string;
+                break;
+            }
+        } else {
+            /* no callback, must be UI action */
+            if (item->resource != NULL) {
+                /* assume integer resources for now */
+                int value = 0;
+
+                resources_get_int(item->resource, &value);
+                if (value == vice_ptr_to_int(item->data)) {
+                    src = item->string;
+                    break;
+                }
+            } else {
+                /* no resource, we'll need the `checked()` function to determine
+                 * if the item is active */
+                if (item->checked != NULL) {
+                    if (item->checked(item)) {
+                        src = item->string;
+                        break;
+                    }
+                } else {
+                    log_error(LOG_DEFAULT,
+                              "item %s doesn't have a callback but also not a"
+                              " resource name set or a `checked` function set.",
+                              item->string);
+                }
+            }
         }
         ++item;
     }
@@ -104,59 +133,15 @@ UI_MENU_CALLBACK(autostart_callback)
                 ui_error("could not start auto-image");
             }
             lib_free(name);
+            sdl_pause_state = 0;
+            ui_action_finish(ACTION_SMART_ATTACH);
             return sdl_menu_text_exit_ui;
         }
+        ui_action_finish(ACTION_SMART_ATTACH);
     }
     return NULL;
 }
 
-UI_MENU_CALLBACK(pause_callback)
-{
-    int paused = ui_emulation_is_paused();
-
-    if (activated) {
-        ui_pause_emulation(!paused);
-        return sdl_menu_text_exit_ui;
-    }
-    return NULL;
-}
-
-UI_MENU_CALLBACK(advance_frame_callback)
-{
-    int paused = ui_emulation_is_paused();
-
-    if (activated) {
-        if (paused) {
-            vsyncarch_advance_frame();
-        } else {
-            ui_pause_emulation(1);
-        }
-        return sdl_menu_text_exit_ui;
-    }
-    return NULL;
-}
-
-UI_MENU_CALLBACK(vkbd_callback)
-{
-    if (activated) {
-        sdl_vkbd_activate();
-        return sdl_menu_text_exit_ui;
-    }
-    return NULL;
-}
-
-UI_MENU_CALLBACK(statusbar_callback)
-{
-    return sdl_ui_menu_toggle_helper(activated, "SDLStatusbar");
-}
-
-UI_MENU_CALLBACK(quit_callback)
-{
-    if (activated) {
-        ui_sdl_quit();
-    }
-    return NULL;
-}
 
 /* ------------------------------------------------------------------ */
 /* Menu helpers */
@@ -193,14 +178,16 @@ const char *sdl_ui_menu_radio_helper(int activated, ui_callback_data_t param, co
         int v;
         const char *w;
         if (resources_query_type(resource_name) == RES_INTEGER) {
-            resources_get_int(resource_name, &v);
-            if (v == vice_ptr_to_int(param)) {
-                return sdl_menu_text_tick;
+            if (resources_get_int(resource_name, &v) == 0) {
+                if (v == vice_ptr_to_int(param)) {
+                    return sdl_menu_text_tick;
+                }
             }
         } else {
-            resources_get_string(resource_name, &w);
-            if (!strcmp(w, (char *)param)) {
-                return sdl_menu_text_tick;
+            if (resources_get_string(resource_name, &w) == 0) {
+                if (!strcmp(w, (char *)param)) {
+                    return sdl_menu_text_tick;
+                }
             }
         }
     }
@@ -243,7 +230,7 @@ const char *sdl_ui_menu_int_helper(int activated, ui_callback_data_t param, cons
     if (activated) {
         value = sdl_ui_text_input_dialog((const char*)param, buf);
         if (value) {
-            new_value = strtol(value, NULL, 0);
+            new_value = (int)strtol(value, NULL, 0);
             resources_set_int(resource_name, new_value);
             lib_free(value);
         }
@@ -253,7 +240,7 @@ const char *sdl_ui_menu_int_helper(int activated, ui_callback_data_t param, cons
     return NULL;
 }
 
-#if (FSDEV_DIR_SEP_CHR == '\\')
+#if (ARCHDEP_DIR_SEP_CHR == '\\')
 char win32_path_buf[80];
 
 static char *sdl_ui_menu_file_translate_seperator(const char *text)
@@ -291,7 +278,7 @@ const char *sdl_ui_menu_file_string_helper(int activated, ui_callback_data_t par
             lib_free(value);
         }
     } else {
-#if (FSDEV_DIR_SEP_CHR == '\\')
+#if (ARCHDEP_DIR_SEP_CHR == '\\')
         if (previous != NULL && previous[0] != 0) {
             return (const char *)sdl_ui_menu_file_translate_seperator(previous);
         }

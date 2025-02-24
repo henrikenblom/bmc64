@@ -1,5 +1,4 @@
-/**
- * \file video.c
+/** \file video.c
  * \brief Native GTK3 UI video stuff
  *
  * \author Marco van den Heuvel <blackystardust68@yahoo.com>
@@ -50,98 +49,140 @@
 
 /** \brief  Log for Gtk3-native video messages
  */
-static log_t    gtk3video_log = LOG_ERR;
+static log_t    gtk3video_log = LOG_DEFAULT;
 
-/** \brief  Keep aspect ratio when resizing */
-static int keepaspect = 0;
-
-/** \brief  Use true aspect ratio */
-static int trueaspect = 0;
-
-/** \brief  Display depth in bits (8, 15, 16, 24, 32) */
-static int display_depth = 24;
-
-
-/** \brief  Set KeepAspectRatio resource (bool)
+/** \brief  Set <CHIP>AspectMode resource (integer)
  *
  * The display will be updated to reflect any changes this makes.
  *
- * \param[in]   val     new value
- * \param[in]   param   extra parameter (unused)
+ * Called by the actual resource handler (do not call directly)
+ *
+ * \param[in]   mode    new value
+ * \param[in]   canvas  extra parameter (canvas associated with this videochip)
  *
  * \return 0
  */
-static int set_keepaspect(int val, void *param)
+int ui_set_aspect_mode(int mode, void *canvas)
 {
-    keepaspect = val ? 1 : 0;
+    video_canvas_t *cv = canvas;
+    cv->videoconfig->aspect_mode = mode;
     ui_trigger_resize();
     return 0;
 }
 
-
-/** \brief  Set TrueAspectRatio resource (bool)
+/** \brief  Set <CHIP>AspectRatio resource (string)
  *
  * The display will be updated to reflect any changes this makes.
  *
- * \param[in]   val     new value
- * \param[in]   param   extra parameter (unused)
+ * Called by the actual resource handler (do not call directly)
+ *
+ * \param[in]   aspect    new value
+ * \param[in]   canvas  extra parameter (canvas associated with this videochip)
  *
  * \return 0
  */
-static int set_trueaspect(int val, void *param)
+int ui_set_aspect_ratio(double aspect, void *canvas)
 {
-    trueaspect = val ? 1 : 0;
+    video_canvas_t *cv = canvas;
+    cv->videoconfig->aspect_ratio = aspect;
     ui_trigger_resize();
     return 0;
 }
 
-/** \brief Set the display color depth.
- *  \param     val   new color depth
- *  \param[in] param extra parameter (unused).
- *  \return  Zero on success, nonzero on illegal argument
- *  \warning Neither Cairo nor GTK3's OpenGL system actually respect
- *           this value.
+/** \brief Set the display filter for scaling.
+ *  \param       val     new filter (0: nearest, 1: bilinear, 2: bicubic)
+ *  \param[in]   canvas  canvas this applies to
+ *  \return  0
  */
-static int set_display_depth(int val, void *param)
+int ui_set_glfilter(int val, void *canvas)
 {
-    if (val != 0 && val != 8 && val != 15 && val != 16 && val != 24 && val != 32) {
-        return -1;
+    video_canvas_t *cv = canvas;
+    if (val < 0) {
+        val = 0;
     }
-    display_depth = val;
+    if (val > 2) {
+        val = 2;
+    }
+    cv->videoconfig->glfilter = val;
     return 0;
 }
 
-/** \brief  Command line options related to generic video output
- */
-static const cmdline_option_t cmdline_options[] =
+int ui_set_flipx(int val, void *canvas)
 {
-    { "-trueaspect", SET_RESOURCE, CMDLINE_ATTRIB_NONE,
-      NULL, NULL, "TrueAspectRatio", (resource_value_t)1,
-      NULL, "Enable true aspect ratio" },
-    { "+trueaspect", SET_RESOURCE, CMDLINE_ATTRIB_NONE,
-      NULL, NULL, "TrueAspectRatio", (resource_value_t)0,
-      NULL, "Disable true aspect ratio" },
-    { "-keepaspect", SET_RESOURCE, CMDLINE_ATTRIB_NONE,
-      NULL, NULL, "KeepAspectRatio", (resource_value_t)1,
-      NULL, "Keep aspect ratio when scaling" },
-    { "+keepaspect", SET_RESOURCE, CMDLINE_ATTRIB_NONE,
-      NULL, NULL, "KeepAspectRatio", (resource_value_t)0,
-      NULL, "Do not keep aspect ratio when scaling (freescale)" },
-    CMDLINE_LIST_END
-};
+    video_canvas_t *cv = canvas;
+    if (val < 0) {
+        val = 0;
+    }
+    if (val > 1) {
+        val = 1;
+    }
+    cv->videoconfig->flipx = val;
+    return 0;
+}
 
+int ui_set_flipy(int val, void *canvas)
+{
+    video_canvas_t *cv = canvas;
+    if (val < 0) {
+        val = 0;
+    }
+    if (val > 1) {
+        val = 1;
+    }
+    cv->videoconfig->flipy = val;
+    return 0;
+}
 
-/** \brief  Integer/boolean resources related to video output
+int ui_set_rotate(int val, void *canvas)
+{
+    video_canvas_t *cv = canvas;
+    if (val < 0) {
+        val = 0;
+    }
+    if (val > 1) {
+        val = 1;
+    }
+    cv->videoconfig->rotate = val;
+    return 0;
+}
+
+/** \brief  Set VSync resource (bool)
+ *
+ * The display will be updated to reflect any changes this makes.
+ *
+ * \param[in]   val     new value
+ * \param[in]   canvas  canvas this applies to
+ *
+ * \return 0
  */
-static const resource_int_t resources_int[] = {
-    { "KeepAspectRatio", 1, RES_EVENT_NO, NULL,
-      &keepaspect, set_keepaspect, NULL },
-    { "TrueAspectRatio", 1, RES_EVENT_NO, NULL,
-      &trueaspect, set_trueaspect, NULL },
-    { "DisplayDepth", 0, RES_EVENT_NO, NULL,
-      &display_depth, set_display_depth, NULL },
-    RESOURCE_INT_LIST_END
-};
+int ui_set_vsync(int val, void *canvas)
+{
+    video_canvas_t *cv = canvas;
+    if (val < 0) {
+        val = 0;
+    }
+    if (val > 1) {
+        val = 1;
+    }
+    cv->videoconfig->vsync = val;
+    return 0;
+}
+
+int video_arch_get_active_chip(void)
+{
+    int window_idx = ui_get_main_window_index();
+
+    switch (window_idx) {
+        case SECONDARY_WINDOW:
+            return VIDEO_CHIP_VDC;
+            break;
+
+        case PRIMARY_WINDOW:
+        default:
+            return VIDEO_CHIP_VICII;
+            break;
+    }
+}
 
 /** \brief  Arch-specific initialization for a video canvas
  *  \param[inout] canvas The canvas being initialized
@@ -149,7 +190,17 @@ static const resource_int_t resources_int[] = {
  */
 void video_arch_canvas_init(struct video_canvas_s *canvas)
 {
-    canvas->video_draw_buffer_callback = NULL;
+    pthread_mutexattr_t lock_attributes;
+
+    pthread_mutexattr_init(&lock_attributes);
+    pthread_mutexattr_settype(&lock_attributes, PTHREAD_MUTEX_RECURSIVE);
+    pthread_mutex_init(&canvas->lock, &lock_attributes);
+
+    /*
+     * the render output can always be read from in GTK3,
+     * it's not a direct video memory buffer.
+     */
+    canvas->videoconfig->readable = 1;
 }
 
 
@@ -159,9 +210,6 @@ void video_arch_canvas_init(struct video_canvas_s *canvas)
  */
 int video_arch_cmdline_options_init(void)
 {
-    if (machine_class != VICE_MACHINE_VSID) {
-        return cmdline_register_options(cmdline_options);
-    }
     return 0;
 }
 
@@ -172,9 +220,6 @@ int video_arch_cmdline_options_init(void)
  */
 int video_arch_resources_init(void)
 {
-    if (machine_class != VICE_MACHINE_VSID) {
-        return resources_register_int(resources_int);
-    }
     return 0;
 }
 
@@ -192,13 +237,15 @@ char video_canvas_can_resize(video_canvas_t *canvas)
     return 1;
 }
 
-/** \brief Create a new video_canvas_s.
- *  \param[inout] canvas A freshly allocated canvas object.
- *  \param[in]    width  Pointer to a width value. May be NULL if canvas
- *                       size is not yet known.
- *  \param[in]    height Pointer to a height value. May be NULL if canvas
- *                       size is not yet known.
- *  \param        mapped Unused.
+/** \brief  Create a new video_canvas_s.
+ *
+ *  \param[in,out]  canvas  A freshly allocated canvas object.
+ *  \param[in]      width   Pointer to a width value. May be NULL if canvas
+ *                          size is not yet known.
+ *  \param[in]      height  Pointer to a height value. May be NULL if canvas
+ *                          size is not yet known.
+ *  \param          mapped  Unused.
+ *
  *  \return The completely initialized canvas. The window that holds
  *          it will be visible in the UI at time of return.
  */
@@ -206,8 +253,6 @@ video_canvas_t *video_canvas_create(video_canvas_t *canvas,
                                     unsigned int *width, unsigned int *height,
                                     int mapped)
 {
-    canvas->initialized = 0;
-    canvas->created = 0;
     canvas->renderer_context = NULL;
     canvas->blank_ptr = NULL;
     canvas->pen_ptr = NULL;
@@ -215,15 +260,18 @@ video_canvas_t *video_canvas_create(video_canvas_t *canvas,
     canvas->pen_x = -1;
     canvas->pen_y = -1;
     canvas->pen_buttons = 0;
-    ui_create_main_window(canvas);
-    if (width && height && canvas->renderer_backend) {
-        canvas->renderer_backend->update_context(canvas, *width, *height);
+
+    if (!console_mode) {
+        ui_create_main_window(canvas);
+
+        if (width && height && canvas->renderer_backend) {
+            canvas->renderer_backend->update_context(canvas, *width, *height);
+        }
+
+        ui_display_main_window(canvas->window_index);
     }
 
-    ui_display_main_window(canvas->window_index);
-
     canvas->created = 1;
-    canvas->initialized = 1;
     return canvas;
 }
 
@@ -245,11 +293,13 @@ void video_canvas_destroy(struct video_canvas_s *canvas)
             g_object_unref(G_OBJECT(canvas->pen_ptr));
             canvas->pen_ptr = NULL;
         }
+
+        pthread_mutex_destroy(&canvas->lock);
     }
 }
 
 /** \brief Update the display on a video canvas to reflect the machine
- *         state. 
+ *         state.
  * \param canvas The canvas to update.
  * \param xs     A parameter to forward to video_canvas_render()
  * \param ys     A parameter to forward to video_canvas_render()
@@ -286,7 +336,7 @@ void video_canvas_refresh(struct video_canvas_s *canvas,
 
 void video_canvas_resize(struct video_canvas_s *canvas, char resize_canvas)
 {
-    if (!canvas || !canvas->drawing_area) {
+    if (!canvas || !canvas->event_box) {
         return;
     } else {
         int new_width = canvas->draw_buffer->canvas_physical_width;
@@ -321,12 +371,14 @@ void video_canvas_adjust_aspect_ratio(struct video_canvas_s *canvas)
 {
     int width = canvas->draw_buffer->canvas_physical_width;
     int height = canvas->draw_buffer->canvas_physical_height;
-    if (keepaspect && trueaspect) {
+    if (canvas->videoconfig->aspect_mode == VIDEO_ASPECT_MODE_CUSTOM) {
+        width *= canvas->videoconfig->aspect_ratio;
+    } else if (canvas->videoconfig->aspect_mode == VIDEO_ASPECT_MODE_TRUE) {
         width *= canvas->geometry->pixel_aspect_ratio;
     }
 
     /* Finally alter our minimum size so the GUI may respect the new minima/maxima */
-    gtk_widget_set_size_request(canvas->drawing_area, width, height);
+    gtk_widget_set_size_request(canvas->event_box, width, height);
 }
 
 /** \brief Assign a palette to the canvas.
@@ -352,7 +404,7 @@ int video_canvas_set_palette(struct video_canvas_s *canvas,
  */
 int video_init(void)
 {
-    if (gtk3video_log == LOG_ERR) {
+    if (gtk3video_log == LOG_DEFAULT) {
         gtk3video_log = log_open("Gtk3Video");
     }
     return 0;

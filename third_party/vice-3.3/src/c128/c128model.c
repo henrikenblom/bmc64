@@ -30,11 +30,13 @@
 #include "c128-resources.h"
 #include "c128model.h"
 #include "cia.h"
+#include "drive.h"
 #include "machine.h"
 #include "resources.h"
 #include "sid.h"
 #include "types.h"
 #include "vicii.h"
+#include "vdc.h"
 #include "vdctypes.h"
 
 #define CIA_MODEL_DEFAULT_OLD CIA_MODEL_6526
@@ -44,7 +46,6 @@ static int is_new_sid(int model)
 {
     switch (model) {
         case SID_MODEL_6581:
-        case SID_MODEL_6581R4:
         default:
             return 0;
 
@@ -67,10 +68,12 @@ static int is_new_cia(int model)
 
 /*
 C128:             SID 6581, VDC 8563, 16 KB VDC RAM.
-C128D (plastic):  SID 6581, VDC 8563, 16 KB VDC RAM (like C128+1571)
+C128D (plastic):  SID 6581, VDC 8563, 16 KB VDC RAM, new BASIC ROM?, new floppy ROM? (like C128+1571)
 C128D (metal):    SID 8580, VDC 8568, 64 KB VDC RAM, new BASIC ROM?, new floppy ROM?
 C128DCR (like above)
- */
+
+FIXME: ROM differences not handled. New Floppy ROM handles 5710 in drive.
+*/
 
 struct model_s {
     int video;   /* machine video timing */
@@ -78,19 +81,23 @@ struct model_s {
     int sid;     /* old or new */
     int vdc;     /* old or new */
     int vdc64k;
+    int board;   /* 0: C128 FLAT, 1: C128 D */
+    int drive;
 };
 
-static struct model_s c128models[] = {
-    { MACHINE_SYNC_PAL,  OLD_CIA, OLD_SID, VDC_REVISION_1, VDC16K },
-    { MACHINE_SYNC_PAL,  NEW_CIA, NEW_SID, VDC_REVISION_2, VDC64K },
-    { MACHINE_SYNC_NTSC, OLD_CIA, OLD_SID, VDC_REVISION_1, VDC16K },
-    { MACHINE_SYNC_NTSC, NEW_CIA, NEW_SID, VDC_REVISION_2, VDC64K },
+static const struct model_s c128models[] = {
+    { MACHINE_SYNC_PAL,  OLD_CIA, OLD_SID, VDC_REVISION_1, VDC16K, BOARD_C128,  DRIVE_TYPE_NONE }, /* PAL C128 flat */
+    { MACHINE_SYNC_PAL,  OLD_CIA, OLD_SID, VDC_REVISION_1, VDC16K, BOARD_C128D, DRIVE_TYPE_1571 }, /* PAL C128D */
+    { MACHINE_SYNC_PAL,  NEW_CIA, NEW_SID, VDC_REVISION_2, VDC64K, BOARD_C128D, DRIVE_TYPE_1571CR }, /* PAL C128DCR */
+    { MACHINE_SYNC_NTSC, OLD_CIA, OLD_SID, VDC_REVISION_1, VDC16K, BOARD_C128,  DRIVE_TYPE_NONE }, /* NTSC C128 flat */
+    { MACHINE_SYNC_NTSC, OLD_CIA, OLD_SID, VDC_REVISION_1, VDC16K, BOARD_C128D, DRIVE_TYPE_1571 }, /* NTSC C128D */
+    { MACHINE_SYNC_NTSC, NEW_CIA, NEW_SID, VDC_REVISION_2, VDC64K, BOARD_C128D, DRIVE_TYPE_1571CR }, /* NTSC C128DCR */
 };
 
 /* ------------------------------------------------------------------------- */
 
 static int c128model_get_temp(int video, int sid_model, int vdc_revision, int vdc_64k,
-                       int cia1model, int cia2model)
+                       int cia1model, int cia2model, int board, int drive)
 {
     int new_sid;
     int new_cia;
@@ -107,6 +114,8 @@ static int c128model_get_temp(int video, int sid_model, int vdc_revision, int vd
         if ((c128models[i].video == video)
             && (c128models[i].vdc == vdc_revision)
             && (c128models[i].vdc64k == vdc_64k)
+            && (c128models[i].board == board)
+            && ((c128models[i].drive == DRIVE_TYPE_NONE) || (c128models[i].drive == drive))
             && (c128models[i].cia == new_cia)
             && (c128models[i].sid == new_sid)) {
             return i;
@@ -118,25 +127,27 @@ static int c128model_get_temp(int video, int sid_model, int vdc_revision, int vd
 
 int c128model_get(void)
 {
-    int video, sid_model, cia1model, cia2model, vdc_revision, vdc_64k;
+    int video, sid_model, cia1model, cia2model, vdc_revision, vdc_64k, board, drive;
 
     if ((resources_get_int("MachineVideoStandard", &video) < 0)
         || (resources_get_int("SidModel", &sid_model) < 0)
         || (resources_get_int("CIA1Model", &cia1model) < 0)
         || (resources_get_int("CIA2Model", &cia2model) < 0)
         || (resources_get_int("VDCRevision", &vdc_revision) < 0)
-        || (resources_get_int("VDC64KB", &vdc_64k) < 0)) {
+        || (resources_get_int("VDC64KB", &vdc_64k) < 0)
+        || (resources_get_int("BoardType", &board) < 0)
+        || (resources_get_int("Drive8Type", &drive) < 0)) {
         return -1;
     }
 
     return c128model_get_temp(video, sid_model, vdc_revision, vdc_64k,
-                              cia1model, cia2model);
+                              cia1model, cia2model, board, drive);
 }
 
 #if 0
 static void c128model_set_temp(int model, int *vicii_model, int *sid_model,
                         int *vdc_revision, int *vdc_64k, int *cia1model,
-                        int *cia2model)
+                        int *cia2model, int *board)
 {
     int old_model;
     int old_engine;
@@ -144,9 +155,10 @@ static void c128model_set_temp(int model, int *vicii_model, int *sid_model,
     int new_sid_model;
     int old_type;
     int new_type;
+    int board;
 
     old_model = c128model_get_temp(*vicii_model, *sid_model, *vdc_revision,
-                                   *vdc_64k, *cia1model, *cia2model);
+                                   *vdc_64k, *cia1model, *cia2model, *board);
 
     if ((model == old_model) || (model == C128MODEL_UNKNOWN)) {
         return;
@@ -157,6 +169,7 @@ static void c128model_set_temp(int model, int *vicii_model, int *sid_model,
     *cia2model = c128models[model].cia;
     *vdc_revision = c128models[model].vdc;
     *vdc_64k = c128models[model].vdc64k;
+    *board = c128models[model].board;
 
     /* Only change the SID model if the model changes from 6581 to 8580.
        This allows to switch between "pal"/"oldpal" without changing
@@ -181,8 +194,10 @@ void c128model_set(int model)
     int old_engine;
     int old_sid_model;
     int old_type;
+    int old_drive = DRIVE_TYPE_NONE;
     int new_sid_model;
     int new_type;
+    int pf;
 
     old_model = c128model_get();
 
@@ -191,10 +206,33 @@ void c128model_set(int model)
     }
 
     resources_set_int("MachineVideoStandard", c128models[model].video);
+    /* Determine the power net frequency for this model. */
+    switch(c128models[model].video) {
+        case MACHINE_SYNC_PAL:
+        case MACHINE_SYNC_PALN:
+            pf = 50;
+            break;
+        default:
+            pf = 60;
+            break;
+    }
+    resources_set_int("MachinePowerFrequency", pf);
     resources_set_int("CIA1Model", c128models[model].cia);
     resources_set_int("CIA2Model", c128models[model].cia);
     resources_set_int("VDCRevision", c128models[model].vdc);
     resources_set_int("VDC64KB", c128models[model].vdc64k);
+    resources_set_int("BoardType", c128models[model].board);
+    if (c128models[model].drive != DRIVE_TYPE_NONE) {
+        /* If the model has a builtin drive, set it */
+        resources_set_int("Drive8Type", c128models[model].drive);
+    } else {
+        /* In all other cases, check if the drive is 1571CR, and if so, switch
+           to regular 1571 */
+        resources_get_int("Drive8Type", &old_drive);
+        if (old_drive == DRIVE_TYPE_1571CR) {
+            resources_set_int("Drive8Type", DRIVE_TYPE_1571);
+        }
+    }
 
     /* Only change the SID model if the model changes from 6581 to 8580
        This allows to switch between "pal"/"oldpal" without changing

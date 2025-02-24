@@ -29,10 +29,9 @@
 
 #include <gtk/gtk.h>
 
-#include "widgethelpers.h"
-#include "debug_gtk3.h"
-#include "resources.h"
+#include "vice_gtk3.h"
 #include "machine.h"
+#include "resources.h"
 
 #include "machinemodelwidget.h"
 
@@ -61,13 +60,46 @@ static void (*user_callback)(int) = NULL;
 static void on_model_toggled(GtkWidget *widget, gpointer user_data)
 {
     int model = GPOINTER_TO_INT(user_data);
+#if 0
+#ifdef HAVE_DEBUG_GTK3UI
+    if (machine_class == VICE_MACHINE_C128) {
+        int res_board_type = -1;
+        int res_vdc_revision = -1;
+        int res_vdc_64kb = -1;
+        int res_machine_type = -1;
+        int res_video_standard = -1;
+        int res_cia1 = -1;
+        int res_cia2 = -1;
+        int res_sid = -1;
+
+        debug_gtk3("Got model change for C128: %d.", model);
+
+        printf("=== %s ===\n", __func__);
+        resources_get_int("BoardType",      &res_board_type);
+        resources_get_int("VDCRevision",    &res_vdc_revision);
+        resources_get_int("VDC64KB",        &res_vdc_64kb);
+        resources_get_int("MachineType",    &res_machine_type);
+        resources_get_int("MachineVideoStandard",    &res_video_standard);
+        resources_get_int("CIA1Model",      &res_cia1);
+        resources_get_int("CIA2Model",      &res_cia2);
+        resources_get_int("SIDModel",       &res_sid);
+
+        printf("    BoardType             : %d\n", res_board_type);
+        printf("    VDCRevision           : %d\n", res_vdc_revision);
+        printf("    VDC64KB               : %d\n", res_vdc_64kb);
+        printf("    MachineType           : %d\n", res_machine_type);
+        printf("    MachineVideoStandard: : %d\n", res_video_standard);
+        printf("    CIA1                  : %d\n", res_cia1);
+        printf("    CIA2                  : %d\n", res_cia2);
+        printf("    SIDModel              : %d\n", res_sid);
+    }
+#endif
+#endif
 
     if (model_set != NULL &&
             gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(widget))) {
-        debug_gtk3("setting model to %d.", model);
         model_set(model);
         if (user_callback != NULL) {
-            debug_gtk3("calling user-callback with model %d.", model);
             user_callback(model);
         }
     }
@@ -113,34 +145,42 @@ void machine_model_widget_set_models(const char **list)
  */
 GtkWidget *machine_model_widget_create(void)
 {
-    GtkWidget *grid;
-    GtkWidget *radio;
-    GtkRadioButton *last;
-    GSList *group;
-    const char **list;
-    int i;
+    GtkWidget   *grid;
+    GtkWidget   *label;
+    GtkWidget   *radio;
+    GtkWidget   *last;
+    GSList      *group = NULL;
+    const char **list = model_list;
+    int          row = 0;
 
-    grid = uihelpers_create_grid_with_label("Model", 1);
+    grid = gtk_grid_new();
+
+    label = gtk_label_new(NULL);
+    gtk_label_set_markup(GTK_LABEL(label), "<b>Model</b>");
+    gtk_widget_set_halign(label, GTK_ALIGN_START);
+    gtk_widget_set_margin_bottom(label, 8);
+    gtk_grid_attach(GTK_GRID(grid), label, 0, row, 1, 1);
+    row++;
 
     /* add 'unknown' model radio */
     group = NULL;
-    radio = gtk_radio_button_new_with_label(group, "Unknown");
-    g_object_set(radio, "margin-left", 16, NULL);
+    last = radio = gtk_radio_button_new_with_label(group, "Unknown");
     gtk_widget_set_sensitive(radio, FALSE);
-    gtk_grid_attach(GTK_GRID(grid), radio, 0, 1, 1, 1);
+    gtk_grid_attach(GTK_GRID(grid), radio, 0, row, 1, 1);
+    row++;
 
-    last = GTK_RADIO_BUTTON(radio);
-    list = model_list;
     if (list != NULL) {
+        int i;
+
         for (i = 0; list[i] != NULL; i++) {
             radio = gtk_radio_button_new_with_label(group, list[i]);
-            gtk_radio_button_join_group(GTK_RADIO_BUTTON(radio), last);
-            g_object_set(radio, "margin-left", 16, NULL);
-            gtk_grid_attach(GTK_GRID(grid), radio, 0, i + 2, 1, 1);
-            last = GTK_RADIO_BUTTON(radio);
+            gtk_radio_button_join_group(GTK_RADIO_BUTTON(radio),
+                                        GTK_RADIO_BUTTON(last));
+            gtk_grid_attach(GTK_GRID(grid), radio, 0, row, 1, 1);
+            last = radio;
+            row++;
         }
-
-        machine_model_widget_update(grid);
+        machine_model_widget_update(grid, false);
     }
     gtk_widget_show_all(grid);
     return grid;
@@ -151,10 +191,12 @@ GtkWidget *machine_model_widget_create(void)
  *
  * \param[in,out]   widget  machine model widget
  */
-void machine_model_widget_update(GtkWidget *widget)
+void machine_model_widget_update(GtkWidget *widget, bool force_callback)
 {
     GtkWidget *radio;
     int model = 99;
+    int position;
+    bool was_active = true;
 
     if (model_get != NULL) {
         model = model_get();
@@ -168,23 +210,28 @@ void machine_model_widget_update(GtkWidget *widget)
             model -= 2; /*adjust since cbm2/cbm5 share defines */
         }
     }
+#if 0
     debug_gtk3("model ID = %d.", model);
-
+#endif
     if (model == 99) {
-        /* invalid model, make all radio buttons unselected
-         *
-         * XXX: doesn't appear to actually work on my box, so perhaps an
-         *      'uknown' radio button should be added, but then I'd have to
-         *      guard against the user selecting that one
-         */
-        radio = gtk_grid_get_child_at(GTK_GRID(widget), 0, 1);
-        gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(radio), TRUE);
-        return;
+        /* invalid model */
+        position = 1;
+    } else {
+        position = model + 2;
     }
 
-    radio = gtk_grid_get_child_at(GTK_GRID(widget), 0, model + 2);
+    radio = gtk_grid_get_child_at(GTK_GRID(widget), 0, position);
     if (radio != NULL && GTK_IS_RADIO_BUTTON(radio)) {
+        was_active = gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(radio));
         gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(radio), TRUE);
+    }
+
+    if (force_callback && was_active) {
+        /* When asked, make sure a callback happens, even if the model doesn't
+         * seem to change, to re-sync all other widgets. */
+        if (user_callback != NULL) {
+            user_callback(0);
+        }
     }
 }
 
@@ -195,7 +242,7 @@ void machine_model_widget_update(GtkWidget *widget)
  */
 void machine_model_widget_connect_signals(GtkWidget *widget)
 {
-    size_t i = 0;
+    int i = 0;
 
     while (1) {
         GtkWidget *radio = gtk_grid_get_child_at(GTK_GRID(widget), 0, i + 2);

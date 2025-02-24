@@ -53,7 +53,7 @@ typedef struct gfxoutputdrv_data_s {
     unsigned int bpp;
 } gfxoutputdrv_data_t;
 
-STATIC_PROTOTYPE gfxoutputdrv_t bmp_drv;
+static gfxoutputdrv_t bmp_drv;
 
 static int bmpdrv_bytes_per_row(screenshot_t *screenshot)
 {
@@ -462,6 +462,7 @@ static int bmpdrv_memmap_save(const char *filename, int x_size, int y_size, uint
 
 static gfxoutputdrv_t bmp_drv =
 {
+    GFXOUTPUTDRV_TYPE_SCREENSHOT_IMAGE,
     "BMP",
     "BMP screenshot",
     "bmp",

@@ -28,10 +28,10 @@
 #ifndef VICE_SETTINGS_MODEL_H
 #define VICE_SETTINGS_MODEL_H
 
-#include "vice.h"
 #include <gtk/gtk.h>
 
 GtkWidget * settings_model_widget_create(GtkWidget *parent);
 void        settings_model_widget_set_model_func(int (*func)(void));
+void        settings_model_widget_set_memhack_func(const char *(*func)(int));
 
 #endif

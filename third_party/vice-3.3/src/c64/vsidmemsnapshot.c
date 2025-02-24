@@ -55,7 +55,7 @@
 #define SNAP_ROM_MAJOR 0
 #define SNAP_ROM_MINOR 0
 
-static log_t c64_snapshot_log = LOG_ERR;
+static log_t c64_snapshot_log = LOG_DEFAULT;
 
 static const char snap_rom_module_name[] = "C64ROM";
 
@@ -75,8 +75,6 @@ static int c64_snapshot_write_rom_module(snapshot_t *s)
         || SMW_BA(m, mem_chargen_rom, C64_CHARGEN_ROM_SIZE) < 0) {
         goto fail;
     }
-
-    ui_update_menus();
 
     if (snapshot_module_close(m) < 0) {
         goto fail;
@@ -106,7 +104,7 @@ static int c64_snapshot_read_rom_module(snapshot_t *s)
         return 0;
     }
 
-    if (major_version > SNAP_ROM_MAJOR || minor_version > SNAP_ROM_MINOR) {
+    if (snapshot_version_is_bigger(major_version, minor_version, SNAP_ROM_MAJOR, SNAP_ROM_MINOR)) {
         log_error(c64_snapshot_log, "Snapshot module version (%d.%d) newer than %d.%d.", major_version, minor_version, SNAP_ROM_MAJOR, SNAP_ROM_MINOR);
         snapshot_module_close(m);
         return -1;
@@ -123,8 +121,8 @@ static int c64_snapshot_read_rom_module(snapshot_t *s)
     }
 
     memcpy(c64memrom_kernal64_trap_rom, c64memrom_kernal64_rom, C64_KERNAL_ROM_SIZE);
-    c64rom_get_kernal_checksum();
-    c64rom_get_basic_checksum();
+    c64rom_print_kernal_info();
+    c64rom_print_basic_info();
 
     return 0;
 
@@ -191,7 +189,7 @@ int c64_snapshot_read_module(snapshot_t *s)
         return -1;
     }
 
-    if (major_version > SNAP_MAJOR || minor_version > SNAP_MINOR) {
+    if (snapshot_version_is_bigger(major_version, minor_version, SNAP_MAJOR, SNAP_MINOR)) {
         log_error(c64_snapshot_log, "Snapshot module version (%d.%d) newer than %d.%d.", major_version, minor_version, SNAP_MAJOR, SNAP_MINOR);
         goto fail;
     }
@@ -219,8 +217,6 @@ int c64_snapshot_read_module(snapshot_t *s)
     if (c64_snapshot_read_rom_module(s) < 0) {
         goto fail;
     }
-
-    ui_update_menus();
 
     return 0;
 

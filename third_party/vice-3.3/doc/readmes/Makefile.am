@@ -1,11 +1,21 @@
-@ALTERNATE_DOCDIR_TRUE@realdocdir = $(prefix)/share/doc/vice
-@ALTERNATE_DOCDIR_FALSE@realdocdir = $(VICEDIR)/doc
 
-docdir = $(realdocdir)
+SDLREADME = Readme-SDL.txt
+SDL2README = Readme-SDL2.txt
 
 READMES = \
-	Readme-GTK3.txt \
-	Readme-SDL.txt \
-	Readme-SDL2.txt
+	$(SDLREADME) \
+	$(SDL2README)
 
-dist_doc_DATA = $(READMES)
+if USE_SDL2UI
+
+dist_doc_DATA = $(SDL2README)
+
+else
+if USE_SDLUI
+
+dist_doc_DATA = $(SDLREADME)
+
+endif
+endif
+
+EXTRA_DIST = $(READMES)

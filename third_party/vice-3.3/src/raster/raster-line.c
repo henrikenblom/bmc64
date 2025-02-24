@@ -682,7 +682,7 @@ void raster_line_emulate(raster_t *raster)
         if (++raster->num_cached_lines == (1
                                            + raster->geometry->last_displayed_line
                                            - raster->geometry->first_displayed_line)) {
-            raster->dont_cache = 0;
+            raster->dont_cache = 1;
             raster->num_cached_lines = 0;
         }
 
@@ -706,10 +706,6 @@ void raster_line_emulate(raster_t *raster)
             raster->changes->have_on_this_line = 0;
         }
     }
-
-#ifdef RASPI_COMPILE
-    raster_draw_buffer_clone_line(raster);
-#endif
 
     raster->current_line++;
 

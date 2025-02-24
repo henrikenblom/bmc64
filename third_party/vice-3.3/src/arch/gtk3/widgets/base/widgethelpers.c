@@ -38,111 +38,16 @@
 #include "vice.h"
 
 #include <gtk/gtk.h>
+#include <string.h>
+#include <stdbool.h>
 
 #include "lib.h"
 #include "resources.h"
-#include "vsync.h"
 
 #include "vice_gtk3_settings.h"
 #include "debug_gtk3.h"
 
 #include "widgethelpers.h"
-
-
-/** \brief  Size of the buffer used for snprintf() calls to generate labels
- */
-#define LABEL_BUFFER_SIZE   256
-
-
-/** \brief  Create a GtkGrid with a bold GtkLabel as its first widget
- *
- * This creates a GtkGrid with a left-aligned, bold label, optionally spread
- * over multiple columns. If you don't know what pass as the \a columns
- * argument, just pass 1.
- *
- * \note    Deprecated in favour of vice_gtk3_grid_new_spaced_with_label()
- *
- * \param[in]   text    label text
- * \param[in]   columns number of columns in the grid the label should span
- *
- * \return  GtkGrid with a label
- */
-GtkWidget *uihelpers_create_grid_with_label(const gchar *text, gint columns)
-{
-    GtkWidget *grid;
-    GtkWidget *label;
-    gchar buffer[LABEL_BUFFER_SIZE];
-
-    /* sanitize columns input */
-    if (columns < 1) {
-        columns = 1;
-    }
-
-    /* use HTML-ish markup to make the label bold */
-    g_snprintf(buffer, LABEL_BUFFER_SIZE, "<b>%s</b>", text);
-
-    grid = gtk_grid_new();
-    g_object_set(grid, "margin", 8, NULL);
-    label = gtk_label_new(NULL);
-    gtk_label_set_markup(GTK_LABEL(label), buffer);
-    gtk_widget_set_halign(label, GTK_ALIGN_START);    /* align left */
-    g_object_set(label, "margin-bottom", 8, NULL);  /* add 8 units of margin
-                                                       to the bottom */
-    gtk_widget_show(label);
-
-    gtk_grid_attach(GTK_GRID(grid), label, 0, 0, columns, 1);
-    return grid;
-}
-
-/** \brief  Create a GtkGrid with a label radio buttons with text/id pairs
- *
- * \param[in]   label       label text
- * \param[in]   data        text/value pairs for the radio buttons
- * \param[in]   callback    optional callback to trigger when a radio button
- *                          is toggled (`NULL` == no callback)
- *
- * \note    keep in mind that the callback is also triggered when a radio button
- *          is deactivated, so use gtk_toggle_button_get_active() if you only
- *          want to respond to the currently activated radio button
- *
- * \return  GtkGrid
- */
-GtkWidget *uihelpers_radiogroup_create(
-        const gchar *label,
-        const vice_gtk3_radiogroup_entry_t *data,
-        void (*callback)(GtkWidget *, gpointer),
-        int active)
-{
-    GtkWidget *grid;
-    GtkRadioButton *last;
-    GSList *group = NULL;
-    size_t i;
-
-    debug_gtk3("DEPRECATED in favour of vice_gtk3_resource_radiogroup!");
-    grid = uihelpers_create_grid_with_label(label, 1);
-
-    last = NULL;
-    for (i = 0; data[i].name != NULL; i++) {
-        GtkWidget *radio = gtk_radio_button_new_with_label(group, data[i].name);
-        gtk_radio_button_join_group(GTK_RADIO_BUTTON(radio), last);
-        gtk_grid_attach(GTK_GRID(grid), radio, 0, i + 1, 1, 1);
-        g_object_set(radio, "margin-left", 16, NULL);  /* indent 16 units */
-
-        if (active == i) {
-            gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(radio), TRUE);
-        }
-
-        if (callback != NULL) {
-            g_signal_connect(radio, "toggled", G_CALLBACK(callback),
-                    GINT_TO_POINTER(data[i].id));
-        }
-        gtk_widget_show(radio);
-        last = GTK_RADIO_BUTTON(radio);
-    }
-    g_object_set(grid, "margin", 8, NULL);
-    gtk_widget_show(grid);
-    return grid;
-}
 
 
 /** \brief  Get index of \a value in \a list
@@ -178,7 +83,7 @@ int vice_gtk3_radiogroup_get_list_index(
  * So it might need some refactoring
  *
  * \param[in]   grid    GtkGrid containing radio buttons
- * \param[in[   index   index of the radio button (the actual index of the
+ * \param[in]   index   index of the radio button (the actual index of the
  *                      radio button, other widgets are skipped)
  */
 void vice_gtk3_radiogroup_set_index(GtkWidget *grid, int index)
@@ -187,17 +92,14 @@ void vice_gtk3_radiogroup_set_index(GtkWidget *grid, int index)
     int row = 0;
     int radio_index = 0;
 
-
-    debug_gtk3("Looking for index %d.", index);
-
     if (index < 0) {
+        debug_gtk3("Warning: negative index given, giving up.");
         return;
     }
 
     do {
         radio = gtk_grid_get_child_at(GTK_GRID(grid), 0, row);
         if (GTK_IS_TOGGLE_BUTTON(radio)) {
-            debug_gtk3("got toggle button at row %d.", row);
             if (radio_index == index) {
                 gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(radio), TRUE);
                 return;
@@ -216,14 +118,14 @@ void vice_gtk3_radiogroup_set_index(GtkWidget *grid, int index)
  *
  * \param[in]   text    label text
  *
- * \return  label
+ * \return  GtkLabel
   */
 GtkWidget *vice_gtk3_create_indented_label(const char *text)
 {
     GtkWidget *label = gtk_label_new(text);
 
     gtk_widget_set_halign(label, GTK_ALIGN_START);
-    g_object_set(label, "margin-left", 16, NULL);
+    gtk_widget_set_margin_start(label, 16);
     return label;
 }
 
@@ -233,7 +135,7 @@ GtkWidget *vice_gtk3_create_indented_label(const char *text)
  * \param[in]   column_spacing  column spacing (< 0 to use default)
  * \param[in]   row_spacing     row spacing (< 0 to use default)
  *
- * \return  new `GtkGrid` instance
+ * \return  GtkGrid
  */
 GtkWidget *vice_gtk3_grid_new_spaced(int column_spacing, int row_spacing)
 {
@@ -254,7 +156,7 @@ GtkWidget *vice_gtk3_grid_new_spaced(int column_spacing, int row_spacing)
  * \param[in]   label           label text
  * \param[in]   span            number of columns for the \a label to span
  *
- * \return  new `GtkGrid` instance
+ * \return  GtkGrid
  */
 GtkWidget *vice_gtk3_grid_new_spaced_with_label(int column_spacing,
                                                 int row_spacing,
@@ -265,7 +167,7 @@ GtkWidget *vice_gtk3_grid_new_spaced_with_label(int column_spacing,
     GtkWidget *lbl = gtk_label_new(NULL);
     char *temp;
 
-    if (span <= 0) {
+    if (span < 1) {
         span = 1;
     }
 
@@ -273,7 +175,6 @@ GtkWidget *vice_gtk3_grid_new_spaced_with_label(int column_spacing,
     temp = lib_msprintf("<b>%s</b>", label);
     gtk_label_set_markup(GTK_LABEL(lbl), temp);
     gtk_widget_set_halign(lbl, GTK_ALIGN_START);
-    /* g_object_set(lbl, "margin-bottom", 8, NULL); */
     lib_free(temp);
 
     /* attach label */
@@ -283,4 +184,53 @@ GtkWidget *vice_gtk3_grid_new_spaced_with_label(int column_spacing,
 }
 
 
+/** \brief  Set 'margin-bottom' property of the title of a grid with title
+ *
+ * Since we've switched to using a lot of grids with 0 row spacing, it's often
+ * desired to have a little space between a grid's title and its content.
+ *
+ * \param[in]   grid    GtkGrid created with vice_gtk3_grid_new_spaced_with_label()
+ * \param[in]   margin  bottom-margin property value
+ */
+void vice_gtk3_grid_set_title_margin(GtkWidget *grid, int margin)
+{
+    if (grid != NULL && GTK_IS_GRID(grid)) {
+        GtkWidget *title = gtk_grid_get_child_at(GTK_GRID(grid), 0, 0);
+        if (title != NULL && GTK_IS_LABEL(title)) {
+            gtk_widget_set_margin_bottom(title, margin);
+        }
+    }
+}
+
+
+/** \brief  Set margin on \a grid
+ *
+ * Set margins on a GtkGrid. passing a value of <0 means skipping that property.
+ *
+ * \param[in,out]   grid    GtkGrid instance
+ * \param[in]       top     top margin
+ * \param[in]       bottom  bottom margin
+ * \param[in]       start   start (left) margin
+ * \param[in]       end     end (right) margin
+ *
+ */
+void vice_gtk3_grid_set_margins(GtkWidget *grid,
+                                gint top,
+                                gint bottom,
+                                gint start,
+                                gint end)
+{
+    if (top >= 0) {
+        gtk_widget_set_margin_top(grid, top);
+    }
+    if (bottom >= 0) {
+        gtk_widget_set_margin_bottom(grid, bottom);
+    }
+    if (start >= 0) {
+        gtk_widget_set_margin_start(grid, start);
+    }
+    if (end >= 0) {
+        gtk_widget_set_margin_end(grid, end);
+    }
+}
 

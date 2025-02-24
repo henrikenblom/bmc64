@@ -27,6 +27,8 @@
  *
  */
 
+#define DEBUGCART
+
 #include "vice.h"
 
 #include <stdio.h>
@@ -37,6 +39,7 @@
 #include "cartio.h"
 #include "cartridge.h"
 #include "cmdline.h"
+#include "crt.h"
 #include "export.h"
 #include "flash040.h"
 #include "lib.h"
@@ -45,6 +48,7 @@
 #include "maincpu.h"
 #include "mem.h"
 #include "monitor.h"
+#include "ram.h"
 #include "resources.h"
 #include "snapshot.h"
 #include "types.h"
@@ -54,6 +58,12 @@
 #include "vic20cartmem.h"
 #include "vic20mem.h"
 #include "zfile.h"
+
+#ifdef DEBUGCART
+#define DBG(x) printf x
+#else
+#define DBG(x)
+#endif
 
 /* ------------------------------------------------------------------------- */
 /*
@@ -131,11 +141,10 @@ static int ram5_flop;
 static unsigned int cart_rom_bank;
 
 static int vic_fp_writeback;
-static char *cartfile = NULL;   /* perhaps the one in vic20cart.c could
-                                   be used instead? */
+static log_t fp_log = LOG_DEFAULT;
 
-static log_t fp_log = LOG_ERR;
-
+static char *vic_fp_filename = NULL;
+static int vic_fp_filetype = 0;
 /* ------------------------------------------------------------------------- */
 
 /* Some prototypes are needed */
@@ -145,18 +154,20 @@ static void vic_fp_io2_store(uint16_t addr, uint8_t value);
 static int vic_fp_mon_dump(void);
 
 static io_source_t vfp_device = {
-    CARTRIDGE_VIC20_NAME_FP,
-    IO_DETACH_CART,
-    NULL,
-    0x9800, 0x9bff, 0x3ff,
-    0,
-    vic_fp_io2_store,
-    vic_fp_io2_read,
-    vic_fp_io2_peek,
-    vic_fp_mon_dump,
-    CARTRIDGE_VIC20_FP,
-    0,
-    0
+    CARTRIDGE_VIC20_NAME_FP, /* name of the device */
+    IO_DETACH_CART,          /* use cartridge ID to detach the device when involved in a read-collision */
+    IO_DETACH_NO_RESOURCE,   /* does not use a resource for detach */
+    0x9800, 0x9bff, 0x01,    /* range for the device, regs:$9800-$9801, mirrors:$9802-$9bff */
+    0,                       /* read validity determined by the device upon a read */
+    vic_fp_io2_store,        /* store function */
+    NULL,                    /* NO poke function */
+    vic_fp_io2_read,         /* read function */
+    vic_fp_io2_peek,         /* peek function */
+    vic_fp_mon_dump,         /* device state information dump function */
+    CARTRIDGE_VIC20_FP,      /* cartridge ID */
+    IO_PRIO_NORMAL,          /* normal priority, device read needs to be checked for collisions */
+    0,                       /* insertion order, gets filled in by the registration function */
+    IO_MIRROR_NONE           /* NO mirroring */
 };
 
 static io_source_list_t *vfp_list_item = NULL;
@@ -284,9 +295,30 @@ void vic_fp_io2_store(uint16_t addr, uint8_t value)
 
 /* ------------------------------------------------------------------------- */
 
+/* FIXME: this still needs to be tweaked to match the hardware */
+static RAMINITPARAM ramparam = {
+    .start_value = 255,
+    .value_invert = 2,
+    .value_offset = 1,
+
+    .pattern_invert = 0x100,
+    .pattern_invert_value = 255,
+
+    .random_start = 0,
+    .random_repeat = 0,
+    .random_chance = 0,
+};
+
+void vic_fp_powerup(void)
+{
+    if (cart_ram) {
+        ram_init_with_pattern(cart_ram, CART_RAM_SIZE, &ramparam);
+    }
+}
+
 void vic_fp_init(void)
 {
-    if (fp_log == LOG_ERR) {
+    if (fp_log == LOG_DEFAULT) {
         fp_log = log_open(CARTRIDGE_VIC20_NAME_FP);
     }
 }
@@ -305,12 +337,14 @@ void vic_fp_config_setup(uint8_t *rawcart)
 static int zfile_load(const char *filename, uint8_t *dest, size_t size)
 {
     FILE *fd;
+    off_t len;
 
     fd = zfile_fopen(filename, MODE_READ);
     if (!fd) {
         return -1;
     }
-    if (util_file_length(fd) != size) {
+    len = archdep_file_size(fd);
+    if (len < 0 || (size_t)len != size) {
         zfile_fclose(fd);
         return -1;
     }
@@ -322,8 +356,14 @@ static int zfile_load(const char *filename, uint8_t *dest, size_t size)
     return 0;
 }
 
-int vic_fp_bin_attach(const char *filename)
+int vic_fp_crt_attach(FILE *fd, uint8_t *rawcart, const char *filename)
 {
+    crt_chip_header_t chip;
+    int idx = 0;
+
+    vic_fp_filetype = 0;
+    vic_fp_filename = NULL;
+
     if (!cart_ram) {
         cart_ram = lib_malloc(CART_RAM_SIZE);
     }
@@ -331,7 +371,57 @@ int vic_fp_bin_attach(const char *filename)
         cart_rom = lib_malloc(CART_ROM_SIZE);
     }
 
-    util_string_set(&cartfile, filename);
+    /* util_string_set(&cartfile, filename); */ /* FIXME */
+
+    for (idx = 0; idx < 512; idx++) {
+        if (crt_read_chip_header(&chip, fd)) {
+            goto exiterror;
+        }
+
+        DBG(("chip %d at %02x len %02x\n", idx, chip.start, chip.size));
+        if (chip.size != 0x2000) {
+            goto exiterror;
+        }
+
+        if (crt_read_chip(&cart_rom[0x2000 * idx], 0, &chip, fd)) {
+            goto exiterror;
+        }
+    }
+
+    if (export_add(&export_res) < 0) {
+        goto exiterror;
+    }
+
+    flash040core_init(&flash_state, maincpu_alarm_context, FLASH040_TYPE_032B_A0_1_SWAP, cart_rom);
+
+    mem_cart_blocks = VIC_CART_RAM123 |
+                      VIC_CART_BLK1 | VIC_CART_BLK2 | VIC_CART_BLK3 | VIC_CART_BLK5 |
+                      VIC_CART_IO2;
+    mem_initialize_memory();
+
+    vfp_list_item = io_source_register(&vfp_device);
+
+    vic_fp_filetype = CARTRIDGE_FILETYPE_CRT;
+    vic_fp_filename = lib_strdup(filename);
+
+    return CARTRIDGE_VIC20_FP;
+exiterror:
+    vic_fp_detach();
+    return -1;
+}
+
+int vic_fp_bin_attach(const char *filename)
+{
+    vic_fp_filetype = 0;
+    vic_fp_filename = NULL;
+
+    if (!cart_ram) {
+        cart_ram = lib_malloc(CART_RAM_SIZE);
+    }
+    if (!cart_rom) {
+        cart_rom = lib_malloc(CART_ROM_SIZE);
+    }
+
     if (zfile_load(filename, cart_rom, (size_t)CART_ROM_SIZE) < 0) {
         vic_fp_detach();
         return -1;
@@ -350,6 +440,9 @@ int vic_fp_bin_attach(const char *filename)
 
     vfp_list_item = io_source_register(&vfp_device);
 
+    vic_fp_filetype = CARTRIDGE_FILETYPE_BIN;
+    vic_fp_filename = lib_strdup(filename);
+
     return 0;
 }
 
@@ -358,43 +451,102 @@ void vic_fp_detach(void)
     /* try to write back cartridge contents if write back is enabled
        and cartridge wasn't from a snapshot */
     if (vic_fp_writeback && !cartridge_is_from_snapshot) {
-        if (flash_state.flash_dirty) {
-            int n;
-            FILE *fd;
-
-            n = 0;
-            log_message(fp_log, "Flash dirty, trying to write back...");
-            fd = fopen(cartfile, "wb");
-            if (fd) {
-                n = fwrite(flash_state.flash_data, (size_t)CART_ROM_SIZE, 1, fd);
-                fclose(fd);
-            }
-            if (n < 1) {
-                log_message(fp_log, "Failed to write back image `%s'!",
-                            cartfile);
-            } else {
-                log_message(fp_log, "Wrote back image `%s'.",
-                            cartfile);
-            }
-        } else {
-            log_message(fp_log, "Flash clean, skipping write back.");
-        }
+        vic_fp_flush_image();
     }
 
     mem_cart_blocks = 0;
     mem_initialize_memory();
     lib_free(cart_ram);
     lib_free(cart_rom);
-    lib_free(cartfile);
     cart_ram = NULL;
     cart_rom = NULL;
-    cartfile = NULL;
+    lib_free(vic_fp_filename);
+    vic_fp_filename = NULL;
 
     if (vfp_list_item != NULL) {
         export_remove(&export_res);
         io_source_unregister(vfp_list_item);
         vfp_list_item = NULL;
     }
+}
+
+int vic_fp_bin_save(const char *filename)
+{
+    FILE *fd;
+
+    if (filename == NULL) {
+        return -1;
+    }
+
+    fd = fopen(filename, MODE_WRITE);
+
+    if (fd == NULL) {
+        return -1;
+    }
+
+        if (fwrite(flash_state.flash_data, 1, CART_ROM_SIZE, fd) != CART_ROM_SIZE) {
+            fclose(fd);
+            return -1;
+        }
+
+    fclose(fd);
+
+    return 0;
+}
+
+int vic_fp_crt_save(const char *filename)
+{
+    log_error(LOG_DEFAULT, "FIXME: vic_fp_crt_save not implemented");
+    FILE *fd;
+    crt_chip_header_t chip;
+    uint8_t *data;
+    int i;
+
+    fd = crt_create_vic20(filename, CARTRIDGE_VIC20_FP, 0, CARTRIDGE_VIC20_NAME_FP);
+
+    if (fd == NULL) {
+        return -1;
+    }
+
+    chip.type = 2;
+    chip.size = 0x2000;
+    chip.start = 0xa000;
+
+    data = flash_state.flash_data;
+
+    for (i = 0; i < (CART_ROM_SIZE / chip.size); i++) {
+        chip.bank = i; /* bank */
+
+        if (crt_write_chip(data, &chip, fd)) {
+            fclose(fd);
+            return -1;
+        }
+        data += chip.size;
+    }
+
+    fclose(fd);
+    return 0;
+}
+
+int vic_fp_flush_image(void)
+{
+    int ret = 0;
+    if (flash_state.flash_dirty) {
+        log_message(fp_log, "Flash dirty, trying to write back...");
+        if (vic_fp_filetype == CARTRIDGE_FILETYPE_BIN) {
+            ret = vic_fp_bin_save(vic_fp_filename);
+        } else if (vic_fp_filetype == CARTRIDGE_FILETYPE_CRT) {
+            ret = vic_fp_crt_save(vic_fp_filename);
+        }
+        if (ret < 1) {
+            log_message(fp_log, "Failed to write back image `%s'!", vic_fp_filename);
+        } else {
+            log_message(fp_log, "Wrote back image `%s'.", vic_fp_filename);
+        }
+    } else {
+        log_message(fp_log, "Flash clean, skipping write back.");
+    }
+    return ret;
 }
 
 /* ------------------------------------------------------------------------- */
@@ -527,6 +679,10 @@ int vic_fp_snapshot_read_module(snapshot_t *s)
                       VIC_CART_BLK1 | VIC_CART_BLK2 | VIC_CART_BLK3 | VIC_CART_BLK5 |
                       VIC_CART_IO2;
     mem_initialize_memory();
+
+    /* set filetype to none */
+    vic_fp_filename = NULL;
+    vic_fp_filetype = 0;
 
     return 0;
 }

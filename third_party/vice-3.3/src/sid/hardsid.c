@@ -26,6 +26,10 @@
  *
  */
 
+/* #define DEBUG_HARDSID */
+/* define to trace hardsid stuff without having a hardsid */
+/* #define DEBUG_HARDSID_DUMMY */
+
 #include "vice.h"
 
 #include "hardsid.h"
@@ -37,6 +41,27 @@
 
 #include "sid-snapshot.h"
 #include "types.h"
+#include "log.h"
+
+#if defined(DEBUG_HARDSID_DUMMY)
+
+#define hardsid_drv_available() 1
+#define hardsid_drv_reset() log_printf("hardsid_drv_reset")
+#define hardsid_drv_open() (log_printf("hardsid_drv_open"), 0)
+#define hardsid_drv_close() log_printf("hardsid_drv_close")
+#define hardsid_drv_read(addr, chipno)  (log_printf("hardsid_drv_read addr:%02x chip:%d", addr, chipno), 1)
+#define hardsid_drv_store(addr, val, chipno) log_printf("hardsid_drv_store addr:%02x val:%02x chip:%d", addr, val, chipno)
+#define hardsid_drv_set_device(chipno, device) log_printf("hardsid_drv_set_device chip:%02x device:%u", chipno, device)
+#define hardsid_drv_state_read(chipno, sid_state) log_printf("hardsid_drv_state_read chip:%d sid_state:%p", chipno, sid_state)
+#define hardsid_drv_state_write(chipno, sid_state) log_printf("hardsid_drv_state_write chip:%d sid_state:%p", chipno, sid_state)
+
+#endif
+
+#if defined(DEBUG_HARDSID_DUMMY) || defined(DEBUG_HARDSID)
+#define DBG(x) log_printf  x
+#else
+#define DBG(x)
+#endif
 
 static int hardsid_is_open = -1;
 
@@ -56,6 +81,7 @@ int hardsid_open(void)
         hardsid_is_open = hardsid_drv_open();
         memset(sidbuf, 0, sizeof(sidbuf));
     }
+    DBG(("hardsid_open hardsid_is_open=%d", hardsid_is_open));
     return hardsid_is_open;
 }
 
@@ -65,6 +91,7 @@ int hardsid_close(void)
         hardsid_drv_close();
         hardsid_is_open = -1;
     }
+    DBG(("hardsid_close hardsid_is_open=%d", hardsid_is_open));
     return 0;
 }
 

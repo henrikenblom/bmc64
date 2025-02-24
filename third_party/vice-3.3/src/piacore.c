@@ -61,10 +61,10 @@ void mypia_reset(void)
 
     is_peek_access = 0;
 
-    my_set_int(pia_int_num, 0);
+    my_set_int(pia_int_num, 0, 0);
 }
 
-static void mypia_update_irq(void)
+static void mypia_update_irq(CLOCK offset)
 {
     if (0
         || ((mypia.ctrl_a & 0x81) == 0x81)
@@ -72,9 +72,9 @@ static void mypia_update_irq(void)
         || ((mypia.ctrl_b & 0x81) == 0x81)
         || ((mypia.ctrl_b & 0x68) == 0x48)
         ) {
-        my_set_int(pia_int_num, 1);
+        my_set_int(pia_int_num, 1, offset);
     } else {
-        my_set_int(pia_int_num, 0);
+        my_set_int(pia_int_num, 0, offset);
     }
 }
 
@@ -83,13 +83,13 @@ static void mypia_update_irq(void)
  * this currently relies on each edge being called only once,
  * otherwise multiple IRQs could occur. */
 
-void mypia_signal(int line, int edge)
+void mypia_signal(int line, int edge, CLOCK offset)
 {
     switch (line) {
         case PIA_SIG_CA1:
             if (((mypia.ctrl_a & 0x02) ? PIA_SIG_RISE : PIA_SIG_FALL) == edge) {
                 mypia.ctrl_a |= 0x80;
-                mypia_update_irq();
+                mypia_update_irq(offset);
                 if (IS_CA2_TOGGLE_MODE()) {
                     pia_set_ca2(1);
                     mypia.ca_state = 1;
@@ -99,7 +99,7 @@ void mypia_signal(int line, int edge)
         case PIA_SIG_CB1:
             if (((mypia.ctrl_b & 0x02) ? PIA_SIG_RISE : PIA_SIG_FALL) == edge) {
                 mypia.ctrl_b |= 0x80;
-                mypia_update_irq();
+                mypia_update_irq(offset);
                 if (IS_CB2_TOGGLE_MODE()) {
                     pia_set_cb2(1);
                     mypia.cb_state = 1;
@@ -178,7 +178,7 @@ void mypia_store(uint16_t addr, uint8_t byte)
                 mypia.ctrl_a &= 0xbf;
             }
 
-            mypia_update_irq();
+            mypia_update_irq(0);
 
             break;
 
@@ -202,7 +202,7 @@ void mypia_store(uint16_t addr, uint8_t byte)
                 mypia.ctrl_b &= 0xbf;
             }
 
-            mypia_update_irq();
+            mypia_update_irq(0);
 
             break;
     }  /* switch */
@@ -222,7 +222,7 @@ uint8_t mypia_read(uint16_t addr)
             if (mypia.ctrl_a & 4) {
                 if (!is_peek_access) {
                     mypia.ctrl_a &= 0x3f;       /* Clear CA1,CA2 IRQ */
-                    mypia_update_irq();
+                    mypia_update_irq(0);
                 }
                 /* WARNING: for output pins, this port reads the voltage of
                  * the output pins, not the ORA value as the other port.
@@ -241,7 +241,7 @@ uint8_t mypia_read(uint16_t addr)
             if (mypia.ctrl_b & 4) {
                 if (!is_peek_access) {
                     mypia.ctrl_b &= 0x3f;       /* Clear CB1,CB2 IRQ */
-                    mypia_update_irq();
+                    mypia_update_irq(0);
                 }
 
                 /* WARNING: this port reads the ORB for output pins, not
@@ -289,7 +289,8 @@ int mypia_dump(void)
     mon_out("port_a: %02x  port_b: %02x   (written bits only)\n", mypia.port_a, mypia.port_b);
     mon_out(" ddr_a: %02x   ddr_b: %02x   (1 bits are outputs)\n", mypia.ddr_a, mypia.ddr_b);
     mon_out("ctrl_a: %02x  ctrl_b: %02x\n", mypia.ctrl_a, mypia.ctrl_b);
-    mon_out("   ca2: %2x     cb2: %2x\n", mypia.ca_state, mypia.cb_state);
+    mon_out("   ca2: %2x     cb2: %2x\n",
+            (unsigned int)mypia.ca_state, (unsigned int)mypia.cb_state);
     mon_out("CA1 active transition: %d\n", (mypia.ctrl_a & 0x80) >> 7);
     mon_out("CA2 active transition: %d\n", (mypia.ctrl_a & 0x40) >> 6);
 

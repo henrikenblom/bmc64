@@ -30,16 +30,10 @@
  */
 
 #include "vice.h"
-
 #include <gtk/gtk.h>
-#include <glib/gstdio.h>
 
-#include "lib.h"
-#include "basewidgets.h"
-#include "widgethelpers.h"
-#include "debug_gtk3.h"
-#include "resources.h"
 #include "machine.h"
+#include "vice_gtk3.h"
 
 #include "cbm2hardwiredswitcheswidget.h"
 
@@ -47,19 +41,18 @@
 /** \brief  Hardwired switches for 5x0 models
  */
 static const vice_gtk3_radiogroup_entry_t models_cbm5x0[] = {
-    { "50Hz 5x0", 2 },
-    { "60Hz 5x0", 1 },
-    { NULL, -1 }
+    { "50Hz 5x0",  2 },
+    { "60Hz 5x0",  1 },
+    { NULL,       -1 }
 };
-
 
 /** \brief  Hardwired switches for 6x0 models
  */
 static const vice_gtk3_radiogroup_entry_t models_cbm6x0[] = {
-    { "50Hz 6x0", 2 },
-    { "60Hz 6x0", 1 },
-    { "50Hz 7x0", 0 },
-    { NULL, -1 }
+    { "50Hz 6x0",   2 },
+    { "60Hz 6x0",   1 },
+    { "50Hz 7x0",   0 },
+    { NULL,         -1 }
 };
 
 
@@ -72,11 +65,14 @@ GtkWidget *cbm2_hardwired_switches_widget_create(void)
     GtkWidget *grid;
     GtkWidget *radio_group;
 
-    grid = uihelpers_create_grid_with_label("Hardwired switches", 1);
+    grid = vice_gtk3_grid_new_spaced_with_label(8, 0, "Hardwired switches", 1);
+    vice_gtk3_grid_set_title_margin(grid, 8);
+
     radio_group = vice_gtk3_resource_radiogroup_new("ModelLine",
-            machine_class == VICE_MACHINE_CBM5x0 ? models_cbm5x0 : models_cbm6x0,
-            GTK_ORIENTATION_VERTICAL);
-    g_object_set(radio_group, "margin-left", 16, NULL);
+                                                    machine_class == VICE_MACHINE_CBM5x0
+                                                    ? models_cbm5x0 : models_cbm6x0,
+                                                    GTK_ORIENTATION_VERTICAL);
+    gtk_widget_set_margin_start(radio_group, 8);
     gtk_grid_attach(GTK_GRID(grid), radio_group, 0, 1, 1, 1);
     gtk_widget_show_all(grid);
     return grid;
@@ -87,11 +83,11 @@ GtkWidget *cbm2_hardwired_switches_widget_create(void)
  *
  * The \a callback is called with the ModelLine as its argument
  *
- * \param[in]   callback    user-defined callback
+ * \param[in,out]   widget      ModelLine widget
+ * \param[in]       callback    user-defined callback
  */
-void cbm2_hardwired_switches_widget_set_callback(
-        GtkWidget *widget,
-        void (*callback)(GtkWidget *, int))
+void cbm2_hardwired_switches_widget_set_callback(GtkWidget *widget,
+                                                 void (*callback)(GtkWidget*, int))
 {
     GtkWidget *group;
 
@@ -100,4 +96,3 @@ void cbm2_hardwired_switches_widget_set_callback(
         vice_gtk3_resource_radiogroup_add_callback(group, callback);
     }
 }
-

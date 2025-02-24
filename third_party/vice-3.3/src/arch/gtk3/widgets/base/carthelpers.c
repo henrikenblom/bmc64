@@ -29,140 +29,56 @@
 #include "vice.h"
 #include <gtk/gtk.h>
 
-#include "machine.h"
-#include "resources.h"
-#include "lib.h"
-#include "debug_gtk3.h"
+#include "basewidget_types.h"
 #include "cartridge.h"
 
 #include "carthelpers.h"
 
 
-int (*carthelpers_save_func)(int type, const char *filename);
-int (*carthelpers_flush_func)(int type);
-int (*carthelpers_is_enabled_func)(int type);
-int (*carthelpers_enable_func)(int type);
-int (*carthelpers_disable_func)(int type);
-
-
-/** \brief  Placeholder function for functions accepting (int)
+/** \brief  Set toggle button active state while blocking event handler
  *
- * Makes sure calling for example, carthelpers_flush_func() doesn't dereference
- * a NULL pointer when that was passed into carthelpers_set_functions()
+ * Set \a button to \a active while blocking signal handler \a handler_id.
  *
- * \return  -1
+ * \param[in]   button      toggle button
+ * \param[in]   handler_id  ID of signal handler to temporarily block
+ * \param[in]   active      new active state for \a button
  */
-static int null_handler(int type)
+static void set_active_blocked(GtkToggleButton *button,
+                               gulong           handler_id,
+                               gboolean         active)
 {
-    debug_gtk3("warning: not implemented (NULL).");
-    return -1;
+    g_signal_handler_block(G_OBJECT(button), handler_id);
+    gtk_toggle_button_set_active(button, active);
+    g_signal_handler_unblock(G_OBJECT(button), handler_id);
 }
-
-
-/** \brief  Placeholder function for functions accepting (int, const char *)
- *
- * Makes sure calling for example, carthelpers_save_func() doesn't dereference
- * a NULL pointer when that was passed into carthelpers_set_functions()
- *
- * \return  -1
- */
-static int null_handler_save(int type, const char *filename)
-{
-    debug_gtk3("warning: not implemented (NULL).");
-    return -1;
-}
-
-
-/** \brief  Set cartridge helper functions
- *
- * This function helps to avoid the problems with VSID wrt cartridge code:
- * VSID doesn't link against any cartridge code and since the various widgets
- * in src/arch/gtk3 are linked into a single .a object which VSID also links to
- * we need a way to use cartridge functions without VSID borking during linking.
- * Passing in pointers to the cart functions in ${emu}ui.c (except vsidui.c)
- * 'solves' this problem.
- *
- * Normally \a save_func should be cartridge_save_image(), \a fush_func should
- * be cartridge_flush_image() and \a enabled_func should be
- * \a cartridge_type_enabled.
- * These are the functions used by many/all(?) cartridge widgets
- *
- * \param[in]   save_func       cartridge image save-as function
- * \param[in]   flush_func      cartridge image flush/save function
- * \param[in]   is_enabled_func cartridge enabled state function
- * \param[in]   enable_func     cartridge enable function
- * \param[in]   disable_func    cartridge disable function
- */
-void carthelpers_set_functions(
-        int (*save_func)(int, const char *),
-        int (*flush_func)(int),
-        int (*is_enabled_func)(int),
-        int (*enable_func)(int),
-        int (*disable_func)(int))
-{
-    carthelpers_save_func = save_func ? save_func : null_handler_save;
-    carthelpers_flush_func = flush_func ? flush_func : null_handler;
-    carthelpers_is_enabled_func = is_enabled_func ? is_enabled_func : null_handler;
-    carthelpers_enable_func = enable_func ? enable_func : null_handler;
-    carthelpers_disable_func = disable_func ? disable_func : null_handler;
-}
-
-
-/** \brief  Handler for the "destroy" event of a cart enable check button
- *
- * Frees the cartridge name stored as a property in the check button.
- *
- * \param[in]   check   check button
- * \param[in]   data    unused
- */
-static void on_cart_enable_check_button_destroy(GtkCheckButton *check,
-                                                gpointer data)
-{
-    char *name = g_object_get_data(G_OBJECT(check), "CartridgeName");
-    if (name != NULL) {
-        lib_free(name);
-    }
-}
-
 
 /** \brief  Handler for the "toggled" event of the cart enable check button
  *
- * When this function fails to set a resource, it'll revert to the old state,
- * unfortunately this also triggers a new event (calling this very function).
- * I still have to figure out how to temporarily block signals (it's not like
- * Qt)
+ * When this function fails to enable/disable the cartridge, it'll revert \a self
+ * to its previous state.
  *
- * \param[in,out]   check   check button
- * \param[in]       data    unused
+ * \param[in,out]   self    check button
+ * \param[in]       id      cartridge ID
  */
-static void on_cart_enable_check_button_toggled(GtkCheckButton *check,
-                                                gpointer data)
+static void on_cart_enable_check_button_toggled(GtkToggleButton *self,
+                                                gpointer         id)
 {
-    int id;
-    int state;
-#ifdef HAVE_DEBUG_GTK3UI
-    const char *name;
-    name = (const char *)g_object_get_data(G_OBJECT(check), "CartridgeName");
-#endif
+    gulong handler_id;
+    int    cart_id;
 
-    id = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(check), "CartridgeId"));
-    state = gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(check));
-
-    debug_gtk3("setting to %s '%s' (%d).", state ? "enable" : "disable",
-            name, id);
-
-    if (state) {
-        if (carthelpers_enable_func(id) < 0) {
-            debug_gtk3("failed to enable %s cartridge.", name);
-            gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(check), FALSE);
+    cart_id = GPOINTER_TO_INT(id);
+    handler_id = GPOINTER_TO_ULONG(g_object_get_data(G_OBJECT(self), "HandlerId"));
+    if (gtk_toggle_button_get_active(self)) {
+        if (cartridge_enable(cart_id) < 0) {
+            set_active_blocked(self, handler_id, FALSE);
         }
     } else {
-        if (carthelpers_disable_func(id) < 0) {
-            debug_gtk3("failed to disable %s cartridge.", name);
-            gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(check), TRUE);
+        if (cartridge_disable(cart_id) < 0) {
+            set_active_blocked(self, handler_id, TRUE);
         }
     }
 }
+
 
 /** \brief  Create a check button to enable/disable a cartridge
  *
@@ -183,26 +99,24 @@ static void on_cart_enable_check_button_toggled(GtkCheckButton *check,
  * \return  GtkCheckButton
  */
 GtkWidget *carthelpers_create_enable_check_button(const char *cart_name,
-                                                  int cart_id)
+                                                  int         cart_id)
 {
     GtkWidget *check;
-    char *title;
-    gchar *name;
+    gulong     handler_id;
+    char       title[256];
 
-    title = lib_msprintf("Enable %s cartridge", cart_name);
+    g_snprintf(title, sizeof title, "Enable %s emulation", cart_name);
     check = gtk_check_button_new_with_label(title);
-    lib_free(title);    /* Gtk3 makes a copy of the title */
     gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(check),
-            carthelpers_is_enabled_func(cart_id));
+                                 (gboolean)cartridge_type_enabled(cart_id));
 
-    name = lib_stralloc(cart_name);
-    g_object_set_data(G_OBJECT(check), "CartridgeName", (gpointer)name);
-    g_object_set_data(G_OBJECT(check), "CartridgeId", GINT_TO_POINTER(cart_id));
-
-    g_signal_connect(check, "destroy",
-            G_CALLBACK(on_cart_enable_check_button_destroy), NULL);
-    g_signal_connect(check, "toggled",
-            G_CALLBACK(on_cart_enable_check_button_toggled), NULL);
-
+    /* cannot connect unlocked: the signal handler sets a resource */
+    handler_id = g_signal_connect(check,
+                                  "toggled",
+                                  G_CALLBACK(on_cart_enable_check_button_toggled),
+                                  GINT_TO_POINTER(cart_id));
+    g_object_set_data(G_OBJECT(check),
+                      "HandlerId",
+                      GULONG_TO_POINTER(handler_id));
     return check;
 }

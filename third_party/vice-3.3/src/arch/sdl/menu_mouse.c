@@ -26,37 +26,51 @@
 
 #include "vice.h"
 
-#include <stdio.h>
-
-#include "types.h"
-
 #ifdef HAVE_MOUSE
 
 #include "menu_common.h"
-#include "mouse.h"
+#include "uiactions.h"
 #include "uimenu.h"
 
-UI_MENU_DEFINE_TOGGLE(Mouse)
+
 UI_MENU_DEFINE_TOGGLE(SmartMouseRTCSave)
+UI_MENU_DEFINE_TOGGLE(ps2mouse)
 
 const ui_menu_entry_t mouse_menu[] = {
-    { "Grab mouse events",
-      MENU_ENTRY_RESOURCE_TOGGLE,
-      toggle_Mouse_callback,
-      NULL },
+    {   .action   = ACTION_MOUSE_GRAB_TOGGLE,
+        .string   = "Grab mouse events",
+        .type     = MENU_ENTRY_RESOURCE_TOGGLE,
+        .resource = "Mouse"
+    },
     SDL_MENU_ITEM_SEPARATOR,
-    { "Save Smart Mouse RTC data when changed",
-      MENU_ENTRY_RESOURCE_TOGGLE,
-      toggle_SmartMouseRTCSave_callback,
-      NULL },
+    {   .string   = "Save Smart Mouse RTC data when changed",
+        .type     = MENU_ENTRY_RESOURCE_TOGGLE,
+        .callback = toggle_SmartMouseRTCSave_callback
+    },
     SDL_MENU_LIST_END
 };
 
 const ui_menu_entry_t mouse_grab_menu[] = {
-    { "Grab mouse events",
-      MENU_ENTRY_RESOURCE_TOGGLE,
-      toggle_Mouse_callback,
-      NULL },
+    {   .action   = ACTION_MOUSE_GRAB_TOGGLE,
+        .string   = "Grab mouse events",
+        .type     = MENU_ENTRY_RESOURCE_TOGGLE,
+        .resource = "Mouse"
+    },
     SDL_MENU_LIST_END
 };
+
+const ui_menu_entry_t mouse_c64dtv_menu[] = {
+    {   .string   = "Enable PS/2 mouse on userport",
+        .type     = MENU_ENTRY_RESOURCE_TOGGLE,
+        .callback = toggle_ps2mouse_callback
+    },
+    SDL_MENU_ITEM_SEPARATOR,
+    {   .action   = ACTION_MOUSE_GRAB_TOGGLE,
+        .string   = "Grab mouse events",
+        .type     = MENU_ENTRY_RESOURCE_TOGGLE,
+        .resource = "Mouse"
+    },
+    SDL_MENU_LIST_END
+};
+
 #endif

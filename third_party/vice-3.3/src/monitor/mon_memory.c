@@ -36,6 +36,7 @@
 #include "charset.h"
 #include "console.h"
 #include "lib.h"
+#include "mem.h"
 #include "montypes.h"
 #include "mon_memory.h"
 #include "mon_util.h"
@@ -46,8 +47,9 @@
 
 void mon_memory_move(MON_ADDR start_addr, MON_ADDR end_addr, MON_ADDR dest)
 {
-    unsigned int i, dst;
-    int len;
+    long i;
+    unsigned int dst;
+    long len;
     uint16_t start;
     MEMSPACE src_mem, dest_mem;
     uint8_t *buf;
@@ -66,11 +68,11 @@ void mon_memory_move(MON_ADDR start_addr, MON_ADDR end_addr, MON_ADDR dest)
 
     buf = lib_malloc(sizeof(uint8_t) *len);
 
-    for (i = 0; (int)i < len; i++) {
+    for (i = 0; i < len; i++) {
         buf[i] = mon_get_mem_val(src_mem, (uint16_t)ADDR_LIMIT(start + i));
     }
 
-    for (i = 0; (int)i < len; i++) {
+    for (i = 0; i < len; i++) {
         mon_set_mem_val(dest_mem, (uint16_t)ADDR_LIMIT(dst + i), buf[i]);
     }
 
@@ -82,8 +84,9 @@ void mon_memory_compare(MON_ADDR start_addr, MON_ADDR end_addr, MON_ADDR dest)
     uint16_t start;
     MEMSPACE src_mem, dest_mem;
     uint8_t byte1, byte2;
-    unsigned int i, dst;
-    int len;
+    long i;
+    unsigned int dst;
+    long len;
 
     len = mon_evaluate_address_range(&start_addr, &end_addr, TRUE, -1);
     if (len < 0) {
@@ -97,7 +100,7 @@ void mon_memory_compare(MON_ADDR start_addr, MON_ADDR end_addr, MON_ADDR dest)
     dst = addr_location(dest);
     dest_mem = addr_memspace(dest);
 
-    for (i = 0; (int)i < len; i++) {
+    for (i = 0; i < len; i++) {
         byte1 = mon_get_mem_val(src_mem, (uint16_t)ADDR_LIMIT(start + i));
         byte2 = mon_get_mem_val(dest_mem, (uint16_t)ADDR_LIMIT(dst + i));
 
@@ -113,8 +116,9 @@ void mon_memory_fill(MON_ADDR start_addr, MON_ADDR end_addr,
 {
     uint16_t start;
     MEMSPACE dest_mem;
-    unsigned int i, mon_index;
-    int len;
+    unsigned int mon_index;
+    long i;
+    long len;
 
     len = mon_evaluate_address_range(&start_addr, &end_addr, FALSE,
                                      (uint16_t)data_buf_len);
@@ -133,7 +137,7 @@ void mon_memory_fill(MON_ADDR start_addr, MON_ADDR end_addr,
 
     i = 0;
     mon_index = 0;
-    while ((int)i < len) {
+    while (i < len) {
         mon_set_mem_val(dest_mem, (uint16_t)ADDR_LIMIT(start + i),
                         data_buf[mon_index++]);
         if (mon_index >= data_buf_len) {
@@ -151,18 +155,18 @@ void mon_memory_hunt(MON_ADDR start_addr, MON_ADDR end_addr,
     uint8_t *buf;
     uint16_t start, next_read;
     MEMSPACE mem;
-    unsigned int i;
-    int len;
+    long i;
+    long len;
 
     len = mon_evaluate_address_range(&start_addr, &end_addr, TRUE, -1);
-    if (len < 0 || len < (int)(data_buf_len)) {
+    if (len < 0 || len < data_buf_len) {
         mon_out("Invalid range.\n");
         return;
     }
     mem = addr_memspace(start_addr);
     start = addr_location(start_addr);
 
-    buf = lib_malloc(sizeof(uint8_t) * data_buf_len);
+    buf = lib_malloc(data_buf_len);
 
     /* Fill buffer */
     for (i = 0; i < data_buf_len; i++) {
@@ -203,54 +207,21 @@ static const int radix_chars_per_byte[] = {
     8, /* binary */
 };
 
-
-static void memory_to_string(char *buf, MEMSPACE mem, uint16_t addr,
-                             unsigned int len, bool petscii)
-{
-    unsigned int i;
-    uint8_t val;
-
-#if 0
-    printf("memory_to_string(): len = %u\n", len);
-#endif
-    for (i = 0; i < len; i++) {
-        val = mon_get_mem_val(mem, addr);
-
-#ifndef SDL_UI_SUPPORT
-        if (petscii) {
-            val = charset_p_toascii(val, 0);
-        }
-
-        buf[i] = isprint(val) ? val : '.';
-#else
-        /* Handle control chars. that wouldn't be printed verbatim */
-        switch (val) {
-            case '\0':
-                buf[i] = '@';
-                break;
-            case '\t':
-                buf[i] = 'i';
-                break;
-            case '\n':
-                buf[i] = 'j';
-                break;
-            default:
-                buf[i] = val;
-        }
-#endif
-
-        addr++;
-    }
-}
-
 static void set_addr_location(MON_ADDR *a, unsigned l)
 {
     *a = new_addr(addr_memspace(*a), addr_mask(l));
 }
 
+/* display memory dump (binary, text) 'm', 'i', 'ii' commands */
 void mon_memory_display(int radix_type, MON_ADDR start_addr, MON_ADDR end_addr, mon_display_format_t format)
 {
-    unsigned int i, m, cnt = 0, len, max_width, real_width;
+    long i;
+    unsigned int m;
+    unsigned int cnt = 0;
+    long len;
+    unsigned int max_width; /* max. amount of bytes to print per line */
+    unsigned int real_width; /* actual amount of bytes printed per line */
+    static uint8_t screen_width = 0;
     uint16_t addr = 0;
     char *printables;
     char prefix;
@@ -258,22 +229,42 @@ void mon_memory_display(int radix_type, MON_ADDR start_addr, MON_ADDR end_addr, 
     uint16_t display_number;
     uint8_t v;
     size_t plen;
-    static int last_known_xres = 80, last_known_yres = 25;
+
+    /* FIXME: this should really be handled by the UI instead, ie the UI should
+              always just give us valid numbers */
+    static int last_known_xres = 40, last_known_yres = 25;
+    if (console_log) {
+        last_known_xres = console_log->console_xres;
+        last_known_yres = console_log->console_yres;
+    }
 
     prefix = (format == DF_PETSCII) ? '>' : '*';
 
-    if (radix_type) {
-        if (console_log) {
-            last_known_xres = console_log->console_xres;
-            last_known_yres = console_log->console_yres;
+    if (radix_type != e_text) {
+        /* numeric memory dump */
+#if 0
+        switch (radix_type) {
+            case e_hexadecimal: /* 8 chars prompt,
+                                   2 chars per byte, plus 1 space per byte
+                                     every block of 4 starts with an extra space,
+                                   1 char per byte, plus two spaces per line */
+            case e_decimal: /* 8 chars prompt,
+                               3 chars per byte, plus 1 space per byte
+                                 every block of 4 starts with an extra space,
+                               1 char per byte, plus two spaces per line */
+            case e_octal:
+            case e_binary: /* 8 chars prompt,
+                              8 chars per byte, plus 1 space per byte
+                                every block of 4 starts with an extra space,
+                              1 char per byte, plus two spaces per line */
+            default:
+                max_width = (last_known_xres - (8 + 2)) * 4;
+                max_width /= ((radix_chars_per_byte[radix_type] + 1 + 1) * 4) + 1;
+                break;
         }
-        if (radix_type != e_hexadecimal && radix_type != e_decimal && radix_type != e_octal) {
-            max_width = (last_known_xres - 12)
-                        / (radix_chars_per_byte[radix_type] + 2);
-        } else {
-            max_width = (4 * (last_known_xres - 12))
-                        / (4 * (radix_chars_per_byte[radix_type] + 2) + 1);
-        }
+#endif
+        max_width = (last_known_xres - (8 + 2)) * 4;
+        max_width /= ((radix_chars_per_byte[radix_type] + 1 + 1) * 4) + 1;
 
         /* to make the output easier to read, make sure the number of items
            each line equals a power of two */
@@ -285,8 +276,33 @@ void mon_memory_display(int radix_type, MON_ADDR start_addr, MON_ADDR end_addr, 
 
         display_number = max_width * ((last_known_yres - 6) / 2);
     } else {
-        max_width = 40;
-        display_number = 128;
+        /* textual memory dump */
+        uint16_t base;
+        uint8_t rows;
+        int bank;
+
+        mem_get_screen_parameter(&base, &rows, &screen_width, &bank);
+        max_width = screen_width;
+        if (max_width > (last_known_xres - (7 + 2))) {
+            max_width = (last_known_xres - (7 + 2));
+            /* to make the output easier to read, make sure the number of items
+            each line equals a power of two */
+            m = 1;
+            while ((m * 2) <= max_width)  {
+                m *= 2;
+            }
+            max_width = m;
+        } else {
+    /* NOTE: show N multiples of screens width, disable this again if it
+            turns out thats not what we want */
+#if 1
+            /* FIXME: limit width vs console width */
+            while ((7 + 2) + (max_width * 2) + (((max_width * 2) + (screen_width - 1)) / screen_width) <= last_known_xres)  {
+                max_width *= 2;
+            }
+#endif
+        }
+        display_number = max_width * ((last_known_yres - 6) / 2);
     }
 
     /* allocate proper buffer for 'printables' */
@@ -304,51 +320,64 @@ void mon_memory_display(int radix_type, MON_ADDR start_addr, MON_ADDR end_addr, 
 
     while (cnt < len) {
         memset(printables, 0, plen);
+        /* prompt, ">C:e9e6 " (8 chars) */
         mon_out("%c%s:%04x ", prefix, mon_memspace_string[mem], addr);
         for (i = 0, real_width = 0; i < max_width; i++) {
             v = mon_get_mem_val(mem, (uint16_t)ADDR_LIMIT(addr + i));
 
             switch (radix_type) {
-                case 0: /* special case == petscii text */
-                    if (format == DF_PETSCII) {
-                        mon_out("%c", charset_p_toascii(v, 1));
+                case e_text: /* special case == petscii text/screencode */
+                    /* every block of screen_width bytes starts with an extra space */
+                    if (screen_width) {
+                        if (!(i % screen_width)) {
+                            mon_out(" ");
+                        }
+                    }
+                    if (cnt < len) {
+                        if (format == DF_PETSCII) {
+                            mon_petscii_out(1, "%c", v);
+                        } else {
+                            mon_scrcode_out(1, "%c", v);
+                        }
                     } else {
-                        mon_out("%c", charset_p_toascii(
-                                    charset_screencode_to_petcii(v), 1));
+                        mon_out(" ");
                     }
                     real_width++;
                     cnt++;
                     break;
-                case e_decimal:
-                    if (!(cnt % 4)) {
-                        mon_out(" ");
-                    }
-                    if (cnt < len) {
-                        mon_out("%03d ", v);
-                        real_width++;
-                        cnt++;
-                    } else {
-                        mon_out("    ");
-                    }
-                    break;
                 case e_hexadecimal:
-                    if (!(cnt % 4)) {
+                    /* every block of 4 bytes starts with an extra space */
+                    if (!(i % 4)) {
                         mon_out(" ");
                     }
                     if (cnt < len) {
-                        mon_out("%02x ", v);
+                        mon_out("%02x ", v); /* 3 chars */
                         real_width++;
                     } else {
                         mon_out("   ");
                     }
                     cnt++;
                     break;
-                case e_octal:
-                    if (!(cnt % 4)) {
+                case e_decimal:
+                    /* every block of 4 bytes starts with an extra space */
+                    if (!(i % 4)) {
                         mon_out(" ");
                     }
                     if (cnt < len) {
-                        mon_out("%03o ", v);
+                        mon_out("%3d ", v); /* 4 chars */
+                        real_width++;
+                        cnt++;
+                    } else {
+                        mon_out("    ");
+                    }
+                    break;
+                case e_octal:
+                    /* every block of 4 bytes starts with an extra space */
+                    if (!(i % 4)) {
+                        mon_out(" ");
+                    }
+                    if (cnt < len) {
+                        mon_out("%03o ", v); /* 4 chars */
                         real_width++;
                         cnt++;
                     } else {
@@ -356,9 +385,14 @@ void mon_memory_display(int radix_type, MON_ADDR start_addr, MON_ADDR end_addr, 
                     }
                     break;
                 case e_binary:
-                    if (cnt < len) {
-                        mon_print_bin(v, '1', '0');
+                    /* every block of 4 bytes starts with an extra space */
+                    if (!(i % 4)) {
                         mon_out(" ");
+                    }
+                    /* every block of 4 bytes starts with an extra space */
+                    if (cnt < len) {
+                        mon_print_bin(v, '1', '0'); /* 8 chars */
+                        mon_out(" "); /* 1 char */
                         real_width++;
                         cnt++;
                     } else {
@@ -371,10 +405,18 @@ void mon_memory_display(int radix_type, MON_ADDR start_addr, MON_ADDR end_addr, 
             }
         }
 
-        if (radix_type != 0) {
-            memory_to_string(printables, mem, addr, real_width, FALSE);
-            mon_out("  %s", printables);
+        if (radix_type != e_text) {
+            /* for numeric output, add N chars ascii output, plus two spaces */
+            uint8_t val;
+
+            mon_out("  ");
+
+            for (i = 0; i < real_width; i++) {
+                val = mon_get_mem_val(mem, addr + i);
+                mon_petscii_out(1, "%c", val);
+            }
         }
+
         mon_out("\n");
         addr = ADDR_LIMIT(addr + real_width);
         if (mon_stop_output != 0) {
@@ -386,11 +428,14 @@ void mon_memory_display(int radix_type, MON_ADDR start_addr, MON_ADDR end_addr, 
     set_addr_location(&(dot_addr[mem]), addr);
 }
 
-/* display binary data (sprites/chars) */
+/* display binary data (sprites/chars), "mc" and "ms" commands */
 void mon_memory_display_data(MON_ADDR start_addr, MON_ADDR end_addr,
                              unsigned int x, unsigned int y)
 {
-    unsigned i, j, len, cnt = 0;
+    long i;
+    long j;
+    long len;
+    long cnt = 0;
     uint16_t addr = 0;
     MEMSPACE mem;
 
@@ -404,8 +449,11 @@ void mon_memory_display_data(MON_ADDR start_addr, MON_ADDR end_addr,
             mon_out(">%s:%04x ", mon_memspace_string[mem], addr);
             for (j = 0; j < (x / 8); j++) {
                 mon_print_bin(mon_get_mem_val(mem,
-                                              (uint16_t)(ADDR_LIMIT(addr + j))), '.', '*');
+                                              (uint16_t)(ADDR_LIMIT(addr + j))), '#', '.');
                 cnt++;
+            }
+            for (j = 0; j < (x / 8); j++) {
+                mon_out(" %02x", mon_get_mem_val(mem,(uint16_t)(ADDR_LIMIT(addr + j))));
             }
             mon_out("\n");
             addr = ADDR_LIMIT(addr + (x / 8));
@@ -418,10 +466,10 @@ void mon_memory_display_data(MON_ADDR start_addr, MON_ADDR end_addr,
         if (mon_stop_output != 0) {
             break;
         }
+        if ((x == 24) && (y == 21)) {
+            addr++; /* continue at next even address when showing sprites */
+        }
     }
 
-    if ((x == 24) && (y == 21)) {
-        addr++; /* continue at next even address when showing sprites */
-    }
     set_addr_location(&(dot_addr[mem]), addr);
 }

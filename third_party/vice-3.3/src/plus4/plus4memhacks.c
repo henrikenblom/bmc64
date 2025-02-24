@@ -38,6 +38,15 @@
 #include "resources.h"
 #include "types.h"
 
+
+static const char *hack_desc[] = {
+    "None",
+    "256KiB CSORY",
+    "256KiB Hannes",
+    "1MiB Hannes",
+};
+
+
 static int memory_hack = 0;
 
 static int set_memory_hack(int val, void *param)
@@ -48,17 +57,18 @@ static int set_memory_hack(int val, void *param)
         return 0;
     }
 
+    /* check if new memory hack is a valid one */
     switch (val) {
         case MEMORY_HACK_NONE:
         case MEMORY_HACK_C256K:
         case MEMORY_HACK_H256K:
         case MEMORY_HACK_H1024K:
-        case MEMORY_HACK_H4096K:
             break;
         default:
             return -1;
     }
 
+    /* disable active memory hack */
     switch (memory_hack) {
         case MEMORY_HACK_NONE:
             break;
@@ -67,13 +77,13 @@ static int set_memory_hack(int val, void *param)
             break;
         case MEMORY_HACK_H256K:
         case MEMORY_HACK_H1024K:
-        case MEMORY_HACK_H4096K:
             set_h256k_enabled(H256K_DISABLED);
             break;
     }
 
     memory_hack = val;
 
+    /* enable new memory hack */
     switch (memory_hack) {
         case MEMORY_HACK_NONE:
             resources_get_int("RamSize", &ramsize);
@@ -93,13 +103,27 @@ static int set_memory_hack(int val, void *param)
             set_h256k_enabled(H256K_1024K);
             resources_set_int("RamSize", 1024);
             break;
-        case MEMORY_HACK_H4096K:
-            set_h256k_enabled(H256K_4096K);
-            resources_set_int("RamSize", 4096);
-            break;
     }
 
     return 0;
+}
+
+int plus4_memory_hacks_ram_inject(uint16_t addr, uint8_t value)
+{
+    switch (memory_hack) {
+        case MEMORY_HACK_C256K:
+            cs256k_ram_inject(addr, value);
+            break;
+        case MEMORY_HACK_H256K:
+        case MEMORY_HACK_H1024K:
+            h256k_ram_inject(addr, value);
+            break;
+        case MEMORY_HACK_NONE:
+        default:
+            return 0;
+            break;
+    }
+    return 1;
 }
 
 static const resource_int_t resources_int[] = {
@@ -107,6 +131,23 @@ static const resource_int_t resources_int[] = {
       &memory_hack, set_memory_hack, NULL },
     RESOURCE_INT_LIST_END
 };
+
+
+/** \brief  Get description of \a hack
+ *
+ * \param[in]   hack    Plus4 hack ID
+ *
+ * \return  description of hack, to be used in UI or debug code
+ */
+const char *plus4_memory_hacks_desc(int hack)
+{
+    if (hack < 0 || hack >= (sizeof hack_desc / sizeof hack_desc[0])) {
+        return "Invalid";
+    }
+    return hack_desc[hack];
+}
+
+
 
 int plus4_memory_hacks_resources_init(void)
 {
@@ -119,7 +160,7 @@ static const cmdline_option_t cmdline_options[] =
 {
     { "-memoryexphack", SET_RESOURCE, CMDLINE_ATTRIB_NEED_ARGS,
       NULL, NULL, "MemoryHack", NULL,
-      "<device>", "Set the 'memory expansion hack' device (0: None, 1: CSORY 256K, 2: HANNES 256K, 3: HANNES 1024K, 4: HANNES 4096K)" },
+      "<device>", "Set the 'memory expansion hack' device (0: None, 1: CSORY 256KiB, 2: HANNES 256KiB, 3: HANNES 1MiB)" },
     CMDLINE_LIST_END
 };
 

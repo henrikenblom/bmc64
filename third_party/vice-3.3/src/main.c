@@ -37,6 +37,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdbool.h>
+#ifdef USE_VICE_THREAD
+#include <pthread.h>
+#endif
 
 #include "archdep.h"
 #include "cmdline.h"
@@ -53,29 +57,60 @@
 #include "machine.h"
 #include "maincpu.h"
 #include "main.h"
+#include "mainlock.h"
 #include "resources.h"
 #include "sysfile.h"
 #include "types.h"
 #include "uiapi.h"
+#include "uiactions.h"
+#include "uihotkeys.h"
+#include "util.h"
 #include "version.h"
 #include "video.h"
+#include "vsyncapi.h"
 
 #ifdef USE_SVN_REVISION
 #include "svnversion.h"
 #endif
 
 #ifdef DEBUG_MAIN
-#define DBG(x)  printf x
+#define DBG(x)  log_printf x
 #else
 #define DBG(x)
 #endif
 
-#ifdef __OS2__
-const
+/** \brief  Console mode requested on the command line
+ *
+ * The command line contained \c -console
+ */
+bool console_mode = false;
+
+/* FIXME: currently never set to true */
+bool video_disabled_mode = false;
+
+/** \brief  Help was requested on the command line
+ *
+ * The command line contained -?/-h/-help/--help.
+ *
+ * Include "machine.h" to use this variable.
+ */
+bool help_requested = false;
+
+/** \brief  Default setting were requested on the command line
+ *
+ * The command line contained \c -default, which has implications for loading
+ * of configuration and ROM files from certain user directories.
+ */
+bool default_settings_requested = false;
+
+
+void main_loop_forever(void);
+
+#ifdef USE_VICE_THREAD
+void *vice_thread_main(void *);
+static pthread_t vice_thread;
+static pthread_mutex_t init_lock = PTHREAD_MUTEX_INITIALIZER;
 #endif
-int console_mode = 0;
-int video_disabled_mode = 0;
-static int init_done = 0;
 
 
 /** \brief  Size of buffer used to write core team members' names to log/stdout
@@ -88,110 +123,25 @@ static int init_done = 0;
 
 /* ------------------------------------------------------------------------- */
 
-/* This is the main program entry point.  Call this from `main()'.  */
-int main_program(int argc, char **argv)
+log_t main_log;
+
+static void vice_banner(void)
 {
     int i, n;
     const char *program_name;
-    int ishelp = 0;
     char term_tmp[TERM_TMP_SIZE];
     size_t name_len;
 
-
-    lib_init_rand();
-
-    /* Check for -config and -console before initializing the user interface.
-       -config  => use specified configuration file
-       -console => no user interface
-    */
-    DBG(("main:early cmdline(argc:%d)\n", argc));
-    for (i = 0; i < argc; i++) {
-#ifndef __OS2__
-        if ((!strcmp(argv[i], "-console")) || (!strcmp(argv[i], "--console"))) {
-            console_mode = 1;
-            video_disabled_mode = 1;
-        } else
-#endif
-        if ((!strcmp(argv[i], "-config")) || (!strcmp(argv[i], "--config"))) {
-            if ((i + 1) < argc) {
-                vice_config_file = lib_stralloc(argv[++i]);
-            }
-        } else if ((!strcmp(argv[i], "-help")) ||
-                   (!strcmp(argv[i], "--help")) ||
-                   (!strcmp(argv[i], "-h")) ||
-                   (!strcmp(argv[i], "-?"))) {
-            ishelp = 1;
-        }
-    }
-
-    DBG(("main:archdep_init(argc:%d)\n", argc));
-    if (archdep_init(&argc, argv) != 0) {
-        archdep_startup_log_error("archdep_init failed.\n");
-        return -1;
-    }
-
-    if (archdep_vice_atexit(main_exit) != 0) {
-        archdep_startup_log_error("archdep_vice_atexit failed.\n");
-        return -1;
-    }
-
-    maincpu_early_init();
-    machine_setup_context();
-    drive_setup_context();
-    machine_early_init();
-
-    /* Initialize system file locator.  */
-    sysfile_init(machine_name);
-
-    gfxoutput_early_init(ishelp);
-    if ((init_resources() < 0) || (init_cmdline_options() < 0)) {
-        return -1;
-    }
-
-    /* Set factory defaults.  */
-    if (resources_set_defaults() < 0) {
-        archdep_startup_log_error("Cannot set defaults.\n");
-        return -1;
-    }
-
-    /* Initialize the user interface.  `ui_init()' might need to handle the
-       command line somehow, so we call it before parsing the options.
-       (e.g. under X11, the `-display' option is handled independently).  */
-    DBG(("main:ui_init(argc:%d)\n", argc));
-    if (!console_mode && ui_init(&argc, argv) < 0) {
-        archdep_startup_log_error("Cannot initialize the UI.\n");
-        return -1;
-    }
-
-    if (!ishelp) {
-        /* Load the user's default configuration file.  */
-        if (resources_load(NULL) < 0) {
-            /* The resource file might contain errors, and thus certain
-            resources might have been initialized anyway.  */
-            if (resources_set_defaults() < 0) {
-                archdep_startup_log_error("Cannot set defaults.\n");
-                return -1;
-            }
-        }
-    }
-
-    if (log_init() < 0) {
-        archdep_startup_log_error("Cannot startup logging system.\n");
-    }
-
-    DBG(("main:initcmdline_check_args(argc:%d)\n", argc));
-    if (initcmdline_check_args(argc, argv) < 0) {
-        return -1;
-    }
-
     program_name = archdep_program_name();
 
-    /* VICE boot sequence.  */
+    /* NOTE: we do NOT use main_log here on purpose, this is so we can output the
+             welcome banner without the "Main:" prefix */
+
     log_message(LOG_DEFAULT, " ");
 #ifdef USE_SVN_REVISION
-    log_message(LOG_DEFAULT, "*** VICE Version %s, rev %s ***", VERSION, VICE_SVN_REV_STRING);
+    log_message(LOG_DEFAULT, LOG_COL_LWHITE "*** VICE Version %s, rev %s ***" LOG_COL_OFF, VERSION, VICE_SVN_REV_STRING);
 #else
-    log_message(LOG_DEFAULT, "*** VICE Version %s ***", VERSION);
+    log_message(LOG_DEFAULT, LOG_COL_LWHITE "*** VICE Version %s ***" LOG_COL_OFF, VERSION);
 #endif
     log_message(LOG_DEFAULT, " ");
     if (machine_class == VICE_MACHINE_VSID) {
@@ -232,19 +182,255 @@ int main_program(int argc, char **argv)
     log_message(LOG_DEFAULT, "%s", term_tmp);
 
     log_message(LOG_DEFAULT, " ");
-    log_message(LOG_DEFAULT, "This is free software with ABSOLUTELY NO WARRANTY.");
-    log_message(LOG_DEFAULT, "See the \"About VICE\" command for more info.");
+    log_message(LOG_DEFAULT, LOG_COL_LWHITE "This is free software with ABSOLUTELY NO WARRANTY." LOG_COL_OFF);
+    log_message(LOG_DEFAULT, LOG_COL_LWHITE "See the \"About VICE\" command for more info." LOG_COL_OFF);
     log_message(LOG_DEFAULT, " ");
+}
 
-    /* lib_free(program_name); */
+/* This is the main program entry point.  Call this from `main()'.  */
+int main_program(int argc, char **argv)
+{
+    int i, n;
+    int reserr;
+    char *cmdline;
+#ifdef WINDOWS_COMPILE
+    bool no_redirect_streams = false;
+#endif
+    bool loadconfig = true;
+    char *datadir;
 
-    /* Complete the GUI initialization (after loading the resources and
-       parsing the command-line) if necessary.  */
-    if (!console_mode && ui_init_finish() < 0) {
+#ifdef USE_VICE_THREAD
+    /*
+     * The init lock guarantees that all main thread init outcomes are visible
+     * to the VICE thread.
+     */
+
+    pthread_mutex_lock(&init_lock);
+
+    archdep_thread_init();
+
+    mainlock_init();
+#endif
+
+    archdep_set_openmp_wait_policy();
+
+    lib_init();
+
+    /* create string from the commandline that we can log later */
+    cmdline = lib_strdup(argv[0]);
+    for (i = 1; i < argc; i++) {
+        char *p;
+        p = cmdline; /* remember old pointer */
+        cmdline = util_concat(p, " ", argv[i], NULL);
+        lib_free(p); /* free old pointer */
+    }
+
+#ifdef WINDOWS_COMPILE
+    /* make stdin, stdout and stderr available on Windows when compiling with
+     * -mwindows */
+    for (i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "-no-redirect-streams") == 0) {
+            no_redirect_streams = true;
+            /* printf("%s(): found -no-redirect-streams\n", __func__); */
+            break;
+        }
+    }
+    if (!no_redirect_streams) {
+        /* printf("%s(): enabling stream redirection\n", __func__); */
+        archdep_fix_streams();
+    } else {
+        /* printf("%s(): disabling stream redirection\n", __func__); */
+    }
+#endif
+    /* Check for some options at the beginning of the commandline before
+       initializing the user interface or loading the config file.
+       -default => use default config, do not load any config
+       -config  => use specified configuration file
+       -console => no user interface
+       -verbose => more verbose logging
+       -silent => no logging
+       -seed => set the random seed
+    */
+    DBG(("main:early parse cmdline(argc:%d)", argc));
+    for (i = 1; i < argc; i++) {
+        if ((!strcmp(argv[i], "-console")) || (!strcmp(argv[i], "--console"))) {
+            console_mode = true;
+            /* video_disabled_mode = 1;  Breaks exitscreenshot */
+        } else if ((!strcmp(argv[i], "-version")) || (!strcmp(argv[i], "--version"))) {
+#ifdef USE_SVN_REVISION
+            log_message(LOG_DEFAULT, "%s (VICE %s SVN r%d)\n", archdep_program_name(), VERSION, VICE_SVN_REV_NUMBER);
+#else
+            log_message(LOG_DEFAULT, "%s (VICE %s)\n", archdep_program_name(), VERSION);
+#endif
+            archdep_program_name_free();
+            archdep_program_path_free();
+            lib_free(cmdline);
+            exit(EXIT_SUCCESS);
+        } else if ((!strcmp(argv[i], "-config")) || (!strcmp(argv[i], "--config"))) {
+            if ((i + 1) < argc) {
+                vice_config_file = lib_strdup(argv[++i]);
+                loadconfig = true;
+            }
+        } else if ((!strcmp(argv[i], "-default")) || (!strcmp(argv[i], "--default"))) {
+            loadconfig = false;
+#ifndef USE_HEADLESSUI
+            /* don't load custom hotkeys file in user config dir if present */
+            default_settings_requested = 1;
+#endif
+        } else if ((!strcmp(argv[i], "-verbose")) || (!strcmp(argv[i], "--verbose"))) {
+            log_set_limit_early(LOG_LIMIT_VERBOSE);
+        } else if ((!strcmp(argv[i], "-silent")) || (!strcmp(argv[i], "--silent"))) {
+            log_set_limit_early(LOG_LIMIT_SILENT);
+        } else if ((!strcmp(argv[i], "-debug")) || (!strcmp(argv[i], "--debug"))) {
+            log_set_limit_early(LOG_LIMIT_DEBUG);
+        } else if ((!strcmp(argv[i], "-seed")) || (!strcmp(argv[i], "--seed"))) {
+            if ((i + 1) < argc) {
+                lib_rand_seed(strtoul(argv[++i], NULL, 0));
+            }
+        } else {
+            break;
+        }
+    }
+    /* remove the already handled items from the commandline, else they will
+       get parsed again later, which causes surprising effects. */
+    for (n = 1; i < argc; n++, i++) {
+        argv[n] = argv[i];
+    }
+    argv[n] = NULL;
+    argc = n;
+
+    /* help is also special, but we want it NOT to be ignored by the main
+       commandline handler */
+    for (i = 1; i < argc; i++) {
+        if ((!strcmp(argv[i], "-help")) ||
+                   (!strcmp(argv[i], "--help")) ||
+                   (!strcmp(argv[i], "-h")) ||
+                   (!strcmp(argv[i], "-?"))) {
+            help_requested = true;
+        }
+    }
+
+    DBG(("main:archdep_init(argc:%d)", argc));
+    if (archdep_init(&argc, argv) != 0) {
+        archdep_startup_log_error("archdep_init failed.\n");
         return -1;
     }
 
-    if (!console_mode && video_init() < 0) {
+    DBG(("main:early init"));
+    tick_init();
+    maincpu_early_init();
+    machine_setup_context();
+    drive_setup_context();
+    machine_early_init();
+    DBG(("main:early init done"));
+
+    /* Initialize system file locator.  */
+    sysfile_init(machine_name);
+
+    /* generic init, first resources, then cmdline options that use them */
+    if ((init_resources() < 0) ||
+        (init_cmdline_options() < 0)) {
+        return -1;
+    }
+
+    DBG(("main:early gfxoutput init"));
+    gfxoutput_early_init((int)help_requested);
+    gfxoutput_resources_init();
+    if (gfxoutput_cmdline_options_init() < 0) {
+        init_cmdline_options_fail("gfxoutput");
+        return -1;
+    }
+    DBG(("main:early gfxoutput init done"));
+
+    /* Set factory defaults.  */
+    if (resources_set_defaults() < 0) {
+        archdep_startup_log_error("Cannot set defaults.\n");
+        return -1;
+    }
+
+    /* Initialize the UI actions system, this needs to happen before the UI
+     * init so the UI code can register handlers */
+    if (!console_mode && !help_requested) {
+#ifndef USE_HEADLESSUI
+        ui_actions_init();
+        /* also initialize the hotkeys resources/cmdline */
+        ui_hotkeys_resources_init();
+        ui_hotkeys_cmdline_options_init();
+#endif
+    }
+
+    /* Initialize the user interface.  `ui_init_with_args()' might need to handle the
+       command line somehow, so we call it before parsing the options.
+       (e.g. under X11, the `-display' option is handled independently).  */
+    DBG(("main:ui_init(argc:%d)", argc));
+    if (!console_mode) {
+        ui_init_with_args(&argc, argv);
+    }
+
+    if ((!help_requested) && (loadconfig)) {
+        /* Load the user's default configuration file.  */
+        reserr = resources_load(NULL);
+        if (reserr < 0 && reserr != RESERR_FILE_NOT_FOUND) {
+            /* The resource file might contain errors, and thus certain
+            resources might have been initialized anyway.  */
+            if (resources_set_defaults() < 0) {
+                archdep_startup_log_error("Cannot set defaults.\n");
+                return -1;
+            }
+        }
+    }
+
+    /* FIXME: it should be possible to init the log system much earlier */
+    DBG(("main:log init"));
+    if (log_init() < 0) {
+        const char *logfile = NULL;
+
+        /* assuming LogFileName exists */
+        resources_get_string("LogFileName", &logfile);
+
+        if (logfile != NULL && *logfile != '\0') {
+            archdep_startup_log_error(
+                    "Cannot start logging system, failed to open '%s' for writing",
+                    logfile);
+        } else {
+            archdep_startup_log_error("Cannot startup logging system.\n");
+        }
+    }
+
+    main_log = log_open("Main");
+
+    DBG(("main:initcmdline_check_args(argc:%d)", argc));
+    if (initcmdline_check_args(argc, argv) < 0) {
+        return -1;
+    }
+
+    /* Initialize the user interface, 2nd part. */
+    DBG(("main:uidata_init(argc:%d)", argc));
+    if (!console_mode && ui_init() < 0) {
+        archdep_startup_log_error("Cannot initialize the UI.\n");
+        return -1;
+    }
+
+    /* VICE boot sequence.  */
+    vice_banner();
+
+    /* from this point on use main_log ! */
+
+    /* lib_free(program_name); */
+    lib_rand_printseed(main_log); /* log the random seed */
+    log_message(main_log, "command line was: %s", cmdline);
+    lib_free(cmdline);
+
+    /* log VICE system file directory */
+    datadir = archdep_get_vice_datadir();
+    log_message(main_log, "VICE system file directory: '%s'.", datadir);
+    log_message(main_log, "VICE system file search path: '%s'.", get_system_path());
+    lib_free(datadir);
+
+    /* Complete the GUI initialization (after loading the resources and
+       parsing the command-line) if necessary.  */
+
+    if (/*!console_mode && */video_init() < 0) {
         return -1;
     }
 
@@ -256,15 +442,79 @@ int main_program(int argc, char **argv)
         return -1;
     }
 
-    initcmdline_check_attach();
+#ifdef USE_VICE_THREAD
 
-    init_done = 1;
+    if (pthread_create(&vice_thread, NULL, vice_thread_main, NULL)) {
+        log_fatal(main_log, "failed to launch main thread");
+        return 1;
+    }
 
-    /* Let's go...  */
-    log_message(LOG_DEFAULT, "Main CPU: starting at ($FFFC).");
-    maincpu_mainloop();
+    pthread_mutex_unlock(&init_lock);
 
-    log_error(LOG_DEFAULT, "perkele!");
+#else /* #ifdef USE_VICE_THREAD */
+
+    main_loop_forever();
+
+#endif /* #ifdef USE_VICE_THREAD */
 
     return 0;
 }
+
+extern log_t maincpu_log;   /* FIXME: where should this live? */
+
+void main_loop_forever(void)
+{
+    log_message(maincpu_log, "%s", ""); /* ugly hack to produce a blank log line, but not trigger a warning */
+    log_message(maincpu_log, "starting at ($FFFC).");
+
+    /* This doesn't return. The thread will directly exit when requested. */
+    maincpu_mainloop();
+
+    log_fatal(main_log, "perkele! (THREAD)");
+}
+
+#ifdef USE_VICE_THREAD
+
+void vice_thread_shutdown(void)
+{
+    if (!vice_thread) {
+        /* We're exiting early in program life, such as when invoked with -help */
+        return;
+    }
+
+    /* NOTE: use LOG_DEFAULT here on purpose */
+
+    log_message(LOG_DEFAULT, "\n" LOG_COL_LWHITE "Configure Flags" LOG_COL_OFF ":\n%s", CONFIGURE_FLAGS);
+    /* log resources with non default values */
+    resources_log_active();
+    /* log the active config as commandline options */
+    cmdline_log_active();
+
+    if (pthread_equal(pthread_self(), vice_thread)) {
+        printf("FIXME! VICE thread is trying to shut itself down directly, this needs to be called from the ui thread for a correct shutdown!\n");
+        mainlock_initiate_shutdown();
+        return;
+    }
+
+    mainlock_initiate_shutdown();
+
+    pthread_join(vice_thread, NULL);
+
+    log_message(main_log, "VICE thread has been joined.");
+}
+
+void *vice_thread_main(void *unused)
+{
+    /* Let the mainlock system know which thread is the vice thread */
+    mainlock_set_vice_thread();
+
+    /*
+     * main_loop_forever() does not return, so we call archdep_thread_shutdown()
+     * in the mainlock system which manages a direct pthread based thread exit.
+     */
+    main_loop_forever();
+
+    return NULL;
+}
+
+#endif /* #ifdef USE_VICE_THREAD */

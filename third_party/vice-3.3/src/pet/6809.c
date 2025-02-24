@@ -107,11 +107,11 @@ h6809_regs_t h6809_regs;
 
 #define DO_INTERRUPT(int_kind)                                             \
   do {                                                                     \
-        uint8_t ik = (int_kind);                                              \
+        uint8_t ik = (int_kind);                                           \
         if (ik & (IK_TRAP | IK_RESET)) {                                   \
             if (ik & IK_TRAP) {                                            \
                 EXPORT_REGISTERS();                                        \
-                interrupt_do_trap(CPU_INT_STATUS, (uint16_t)PC);               \
+                interrupt_do_trap(CPU_INT_STATUS, (uint16_t)PC);           \
                 IMPORT_REGISTERS();                                        \
                 if (CPU_INT_STATUS->global_pending_int & IK_RESET) {       \
                     ik |= IK_RESET;                                        \
@@ -125,23 +125,20 @@ h6809_regs_t h6809_regs;
         }                                                                  \
         if (ik & (IK_MONITOR | IK_DMA)) {                                  \
             if (ik & IK_MONITOR) {                                         \
-                if (monitor_force_import(CALLER)) {                        \
-                    IMPORT_REGISTERS();                                    \
-                }                                                          \
-                if (monitor_mask[CALLER]) {                                \
-                    EXPORT_REGISTERS();                                    \
-                }                                                          \
                 if (monitor_mask[CALLER] & (MI_STEP)) {                    \
-                    monitor_check_icount((uint16_t)PC);                        \
+                    EXPORT_REGISTERS();                                    \
+                    monitor_check_icount((uint16_t)PC);                    \
                     IMPORT_REGISTERS();                                    \
                 }                                                          \
                 if (monitor_mask[CALLER] & (MI_BREAK)) {                   \
-                    if (monitor_check_breakpoints(CALLER, (uint16_t)PC)) {     \
+                    EXPORT_REGISTERS();                                    \
+                    if (monitor_check_breakpoints(CALLER, (uint16_t)PC)) { \
                         monitor_startup(CALLER);                           \
-                        IMPORT_REGISTERS();                                \
                     }                                                      \
+                    IMPORT_REGISTERS();                                    \
                 }                                                          \
                 if (monitor_mask[CALLER] & (MI_WATCH)) {                   \
+                    EXPORT_REGISTERS();                                    \
                     monitor_check_watchpoints(LAST_OPCODE_ADDR, (uint16_t)PC); \
                     IMPORT_REGISTERS();                                    \
                 }                                                          \
@@ -168,11 +165,11 @@ h6809_regs_t h6809_regs;
         EXPORT_REGISTERS();                                      \
         tmp = machine_jam("   6809: " INSTR " at $%04X   ", PC); \
         switch (tmp) {                                           \
-            case JAM_RESET:                                      \
+            case JAM_RESET_CPU:                                  \
                 DO_INTERRUPT(IK_RESET);                          \
                 break;                                           \
-            case JAM_HARD_RESET:                                 \
-                mem_powerup();                                   \
+            case JAM_POWER_CYCLE:                                \
+                machine_powerup();                               \
                 DO_INTERRUPT(IK_RESET);                          \
                 break;                                           \
             case JAM_MONITOR:                                    \
@@ -236,9 +233,9 @@ static unsigned int cc_changed = 0;
 
 static uint16_t *index_regs[4] = { &X, &Y, &U, &S };
 
-extern void nmi(void);
-extern void irq(void);
-extern void firq(void);
+void nmi(void);
+void irq(void);
+void firq(void);
 
 static void request_nmi(unsigned int source)
 {
@@ -5964,7 +5961,7 @@ void cpu6809_reset (void)
 
 static char snap_module_name[] = "CPU6809";
 #define SNAP_MAJOR 1
-#define SNAP_MINOR 0
+#define SNAP_MINOR 1
 
 int cpu6809_snapshot_write_module(snapshot_t *s)
 {
@@ -5981,7 +5978,7 @@ int cpu6809_snapshot_write_module(snapshot_t *s)
     EXPORT_REGISTERS();
 
     if (0
-        || SMW_DW(m, maincpu_clk) < 0
+        || SMW_CLOCK(m, maincpu_clk) < 0
         || SMW_W(m, GLOBAL_REGS.reg_x) < 0
         || SMW_W(m, GLOBAL_REGS.reg_y) < 0
         || SMW_W(m, GLOBAL_REGS.reg_u) < 0
@@ -6038,7 +6035,7 @@ int cpu6809_snapshot_read_module(snapshot_t *s)
 {
     uint8_t major, minor;
     snapshot_module_t *m;
-    uint32_t my_maincpu_clk;
+    CLOCK my_maincpu_clk;
     uint16_t v;
     uint8_t e, f, md;
 
@@ -6051,13 +6048,13 @@ int cpu6809_snapshot_read_module(snapshot_t *s)
     }
 
     /* Do not accept versions higher than current */
-    if (major > SNAP_MAJOR || minor > SNAP_MINOR) {
+    if (snapshot_version_is_bigger(major, minor, SNAP_MAJOR, SNAP_MINOR)) {
         snapshot_set_error(SNAPSHOT_MODULE_HIGHER_VERSION);
         goto fail;
     }
 
     if (0
-        || SMR_DW(m, &my_maincpu_clk) < 0
+        || SMR_CLOCK(m, &my_maincpu_clk) < 0
         || SMR_W(m, &GLOBAL_REGS.reg_x) < 0
         || SMR_W(m, &GLOBAL_REGS.reg_y) < 0
         || SMR_W(m, &GLOBAL_REGS.reg_u) < 0
