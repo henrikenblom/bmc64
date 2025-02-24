@@ -24,7 +24,7 @@
  *  02111-1307  USA.
  *
  */
-#define _POSIX_C_SOURCE 199309L
+#define _POSIX_C_SOURCE 199309
 #define HAVE_NANOSLEEP 1
 #include "vice.h"
 
@@ -126,31 +126,12 @@ static inline void sleep_impl(tick_t sleep_ticks)
     WaitForSingleObject(wait_timer, INFINITE);
 }
 
-#elif defined(HAVE_NANOSLEEP)
-static inline void sleep_impl(tick_t sleep_ticks)
-{
-    struct timespec ts;
-    uint64_t nanos = TICK_TO_NANO(sleep_ticks);
-
-    if (nanos < NANO_PER_SECOND) {
-        ts.tv_sec = 0;
-        ts.tv_nsec = nanos;
-    } else {
-        ts.tv_sec = nanos / NANO_PER_SECOND;
-        ts.tv_nsec = nanos % NANO_PER_SECOND;
-    }
-
-    nanosleep(&ts, NULL);
-}
-
-#else
 static inline void sleep_impl(tick_t sleep_ticks)
 {
     if (usleep(TICK_TO_MICRO(sleep_ticks)) == -EINVAL) {
         usleep(MICRO_PER_SECOND - 1);
     }
 }
-#endif
 
 /* Sleep a number of timer units. */
 void tick_sleep(tick_t sleep_ticks)
