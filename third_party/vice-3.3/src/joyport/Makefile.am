@@ -37,8 +37,6 @@ libjoyport_a_SOURCES = \
 	mouse.h \
 	multijoy.c \
 	multijoy.h \
-	ninja_snespad.c \
-	ninja_snespad.h \
 	paperclip64.c \
 	paperclip64.h \
 	protopad.c \
