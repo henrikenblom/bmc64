@@ -43,6 +43,12 @@
 #define DBG(_x_)
 #endif
 
+#include "mouse_1351.h"
+#include "mouse_neos.h"
+#include "mouse_paddle.h"
+#include "mouse_quadrature.h"
+#include "powerpad.h"
+
 #include <stdlib.h> /* abs */
 #include <math.h>   /* fabsf */
 
@@ -57,12 +63,6 @@
 #include "mousedrv.h"
 #include "resources.h"
 #include "snapshot.h"
-
-#include "mouse_1351.h"
-#include "mouse_neos.h"
-#include "mouse_paddle.h"
-#include "mouse_quadrature.h"
-#include "powerpad.h"
 
 /* Log descriptor.  */
 #ifdef DEBUG_MOUSE
