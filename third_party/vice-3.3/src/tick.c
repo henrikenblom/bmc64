@@ -104,9 +104,7 @@ tick_t tick_now(void)
 
 static inline void sleep_impl(tick_t sleep_ticks)
 {
-    if (usleep(TICK_TO_MICRO(sleep_ticks)) == -EINVAL) {
-        usleep(MICRO_PER_SECOND - 1);
-    }
+
 }
 
 /* Sleep a number of timer units. */
