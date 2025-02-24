@@ -136,7 +136,6 @@
 #define JOYPORT_DEVICE_RTC                11
 #define JOYPORT_DEVICE_C64_DONGLE         12
 #define JOYPORT_DEVICE_IO_SIMULATION      13
-#define JOYPORT_RES_ID_RTC                11
 
 /* joystick bits */
 #define JOYPORT_P0_BIT    0
