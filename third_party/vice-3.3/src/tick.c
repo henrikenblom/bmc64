@@ -106,7 +106,7 @@ tick_t tick_now(void)
 #elif defined(__FreeBSD__)
     clock_gettime(CLOCK_MONOTONIC_PRECISE, &now);
 #else
-    clock_gettime(CLOCK_MONOTONIC, &now);
+  gettimeofday(&now, NULL);
 #endif
 
     return NANO_TO_TICK(((uint64_t)NANO_PER_SECOND * now.tv_sec) + now.tv_nsec);
