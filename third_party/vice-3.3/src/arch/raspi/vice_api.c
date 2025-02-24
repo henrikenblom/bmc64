@@ -675,11 +675,9 @@ void emux_set_joy_port_device(int port_num, int dev_id) {
 }
 
 void emux_set_joy_pot_x(int port, int value) {
-   joystick_set_potx(port, value);
 }
 
 void emux_set_joy_pot_y(int port, int value) {
-   joystick_set_poty(port, value);
 }
 
 int emux_attach_tape_image(char* filename) {
