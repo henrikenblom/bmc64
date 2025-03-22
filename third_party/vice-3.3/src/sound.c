@@ -1352,6 +1352,7 @@ double sound_flush()
     /* Calculate the number of samples to flush - whole fragments. */
     nr = snddata.bufptr - snddata.bufptr % snddata.fragsize;
     if (!nr) {
+        snddata.playdev->suspend();
         return 0;
     }
 
