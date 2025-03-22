@@ -1177,32 +1177,10 @@ int CKernel::circle_sound_init(const char *param, int *speed, int *fragsize,
   return 0;
 }
 
-int isallz(char *buf, size_t len)
-{
-  long *wide;
-
-  while ((size_t)buf & (sizeof(long) - 1))
-    if (len--, *buf++)
-      return 0;
-  wide = (long *)buf;
-  while (len >= sizeof(long))
-    if (len -= sizeof(long), *wide++)
-      return 0;
-  buf = (char *)wide;
-  while (len)
-    if (len--, *buf++)
-      return 0;
-  return 1;
-}
-
 // Called from VICE: Core 1
 int CKernel::circle_sound_write(int16_t *pbuf, size_t nr) {
   if (mViceSound) {
-    if (nr < 1 || isallz((char *)pbuf, nr)) {
-      circle_set_aux_gpio(1, 0);
-    } else {
-      circle_set_aux_gpio(1, 1);
-    }
+    circle_set_aux_gpio(1, 1);
     return mViceSound->AddChunk(pbuf, nr);
   }
   return 0;
@@ -1212,7 +1190,10 @@ void CKernel::circle_sound_close(void) {
   // Nothing to do here since we never actually close vc4.
 }
 
-int CKernel::circle_sound_suspend(void) { return 0; }
+int CKernel::circle_sound_suspend(void) {
+  circle_set_aux_gpio(1, 0);
+  return 0;
+}
 
 int CKernel::circle_sound_resume(void) { return 0; }
 
