@@ -1198,7 +1198,7 @@ int isallz(char *buf, size_t len)
 // Called from VICE: Core 1
 int CKernel::circle_sound_write(int16_t *pbuf, size_t nr) {
   if (mViceSound) {
-    if (isallz((char *)pbuf, nr)) {
+    if (nr < 1 || isallz((char *)pbuf, nr)) {
       circle_set_aux_gpio(1, 0);
     } else {
       circle_set_aux_gpio(1, 1);
