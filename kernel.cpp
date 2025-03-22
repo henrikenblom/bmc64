@@ -1201,7 +1201,7 @@ int CKernel::circle_sound_write(int16_t *pbuf, size_t nr) {
     if (isallz((char *)pbuf, nr)) {
       circle_set_aux_gpio(1, 0);
     } else {
-      circle_set_aux_gpio(1, 0);
+      circle_set_aux_gpio(1, 1);
     }
     return mViceSound->AddChunk(pbuf, nr);
   }
